@@ -1,0 +1,12 @@
+FROM nginx:alpine
+
+# Copiar configuraciones
+COPY nginx-http-only.conf /nginx-http-only.conf
+COPY nginx.conf /nginx-full.conf
+COPY nginx-entrypoint.sh /entrypoint.sh
+
+# Permisos
+RUN chmod +x /entrypoint.sh
+
+# Entrypoint
+ENTRYPOINT ["/entrypoint.sh"]

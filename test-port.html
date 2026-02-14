@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Port - YIM Gaming</title>
+    <style>
+        body { 
+            font-family: Arial; 
+            background: #1a1a2e; 
+            color: #fff; 
+            padding: 50px;
+            text-align: center;
+        }
+        h1 { color: #00ff88; }
+        .info { 
+            background: #162447; 
+            padding: 20px; 
+            margin: 20px auto;
+            max-width: 600px;
+            border-radius: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>✅ Puerto Funcionando!</h1>
+    <div class="info">
+        <h2>YIM Gaming Community</h2>
+        <p>Si puedes ver esto, el port forwarding está funcionando correctamente.</p>
+        <p id="time"></p>
+    </div>
+    <script>
+        document.getElementById('time').textContent = 'Hora del servidor: ' + new Date().toLocaleString('es-AR');
+    </script>
+</body>
+</html>
