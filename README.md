@@ -1,8 +1,10 @@
-# YIM Gaming Community
+# Multi Gaming Community
 
 Portal multijuegos con landing page, estado de servidores en tiempo real e interfaz cyberpunk.
 
-**Dominio:** yim.servegame.com
+Full funcional para Quake 3 Arena mod cpma, levanta los stats de partidas, las capturas, las correlaciona por mapa fecha hora y muestra el status de la partida actual !
+
+**Dominio:** tu url ip o localhost
 **Stack:** React + Node.js + PostgreSQL + Docker + SSL (Let's Encrypt)
 
 ## ✨ Caracteristicas
@@ -45,7 +47,7 @@ Portal multijuegos con landing page, estado de servidores en tiempo real e inter
 ```env
 NODE_ENV=production
 PORT=5001
-DOMAIN=yim.servegame.com
+DOMAIN= tu url ip o localhost
 DATABASE_URL=postgres://postgres:postgres@db:5432/app_db
 CERTBOT_EMAIL=tu-email@gmail.com
 
