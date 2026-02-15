@@ -8,6 +8,22 @@ import type { MatchStats, PlayerStats, TeamStats, WeaponStats, ItemStats } from 
 // En desarrollo (local): usa ruta de Windows
 const STATS_BASE_PATH = process.env.STATS_PATH || 'G:\\Games\\Quake3\\cpma\\stats';
 
+function resolveMatchId(xmlPath: string, attrs?: Record<string, string>): string {
+  const xmlId = attrs?.id?.toString();
+  if (xmlId && xmlId !== '0') {
+    return xmlId;
+  }
+
+  const relativePath = path.relative(STATS_BASE_PATH, xmlPath);
+  const normalizedPath = relativePath && !relativePath.startsWith('..')
+    ? relativePath
+    : path.basename(xmlPath);
+  const withoutExtension = normalizedPath.replace(/\.xml$/i, '');
+  const fallback = withoutExtension.replace(/[\\/]/g, '-') || path.basename(xmlPath, path.extname(xmlPath));
+
+  return fallback;
+}
+
 /**
  * Parse un archivo XML de estadísticas de CPMA
  */
@@ -16,6 +32,7 @@ export async function parseMatchXML(xmlPath: string): Promise<MatchStats> {
   const result = await parseStringPromise(xmlContent);
   
   const match = result.match.$;
+  const matchId = resolveMatchId(xmlPath, match);
   const isTeamGame = match.isTeamGame === 'true';
   
   let teams: TeamStats[] = [];
@@ -28,7 +45,7 @@ export async function parseMatchXML(xmlPath: string): Promise<MatchStats> {
   }
   
   return {
-    id: match.id,
+    id: matchId,
     datetime: match.datetime,
     map: match.map,
     type: match.type,

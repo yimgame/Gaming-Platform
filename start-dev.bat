@@ -13,6 +13,12 @@ echo.
 set NODE_ENV=development
 set PORT=5001
 
+if "%DATABASE_URL%"=="" (
+	set DATABASE_URL=postgres://postgres:postgres@localhost:5432/app_db
+)
+
+echo DB: %DATABASE_URL%
+
 npx tsx server/index-dev.ts
 
 pause

@@ -20,6 +20,15 @@ import {
   getScreenshotsByMatch,
   getScreenshotsByMapName
 } from "./screenshots-service";
+import {
+  getAllDemos,
+  getDemoPath,
+  getDemosByMatch
+} from "./demos-service";
+import {
+  createManualMatchAsset,
+  getManualMatchAssets
+} from "./match-assets-service";
 import { getServerStatus, refreshServerStatus } from "./q3a-status";
 import { RankingFiltersSchema } from "../shared/stats-schema";
 import fs from "fs";
@@ -146,18 +155,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Obtener screenshots correlacionadas con una partida
   app.get("/api/screenshots/match", async (req, res) => {
     try {
-      const { type, map, datetime } = req.query;
+      const { type, map, datetime, matchId } = req.query;
       
       if (!type || !map || !datetime) {
         return res.status(400).json({ 
           error: "Missing required parameters: type, map, datetime" 
         });
       }
+
+      let manualAssets: Awaited<ReturnType<typeof getManualMatchAssets>> = [];
+      if (matchId) {
+        try {
+          manualAssets = await getManualMatchAssets(matchId as string, "screenshot");
+        } catch (error) {
+          console.error("Error fetching manual screenshot assets, using auto match only:", error);
+        }
+      }
+      const manualFilenames = manualAssets.map(asset => asset.filename);
       
       const screenshots = await getScreenshotsByMatch(
         type as string,
         map as string,
-        datetime as string
+        datetime as string,
+        4,
+        manualFilenames
       );
       
       res.json({ screenshots });
@@ -184,6 +205,122 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error fetching map screenshots:", error);
       res.status(500).json({ error: "Failed to fetch map screenshots" });
+    }
+  });
+
+  // Demos de CPMA
+
+  // Obtener todas las demos
+  app.get("/api/demos", async (_req, res) => {
+    try {
+      const demos = await getAllDemos();
+      res.json({ demos });
+    } catch (error) {
+      console.error("Error fetching demos:", error);
+      res.status(500).json({ error: "Failed to fetch demos" });
+    }
+  });
+
+  // Obtener demos correlacionadas con una partida
+  app.get("/api/demos/match", async (req, res) => {
+    try {
+      const { type, map, datetime, matchId } = req.query;
+
+      if (!type || !map || !datetime) {
+        return res.status(400).json({
+          error: "Missing required parameters: type, map, datetime"
+        });
+      }
+
+      let manualAssets: Awaited<ReturnType<typeof getManualMatchAssets>> = [];
+      if (matchId) {
+        try {
+          manualAssets = await getManualMatchAssets(matchId as string, "demo");
+        } catch (error) {
+          console.error("Error fetching manual demo assets, using auto match only:", error);
+        }
+      }
+      const manualFilenames = manualAssets.map(asset => asset.filename);
+
+      const demos = await getDemosByMatch(
+        type as string,
+        map as string,
+        datetime as string,
+        4,
+        manualFilenames
+      );
+
+      res.json({ demos });
+    } catch (error) {
+      console.error("Error fetching match demos:", error);
+      res.status(500).json({ error: "Failed to fetch match demos" });
+    }
+  });
+
+  // Servir archivo de demo
+  app.get("/api/demos/:filename", async (req, res) => {
+    try {
+      const { filename } = req.params;
+      const filePath = await getDemoPath(filename);
+
+      if (!filePath) {
+        return res.status(404).json({ error: "Demo not found" });
+      }
+
+      res.setHeader("Content-Type", "application/octet-stream");
+      res.setHeader("Content-Disposition", `attachment; filename=\"${filename}\"`);
+
+      const fileStream = fs.createReadStream(filePath);
+      fileStream.pipe(res);
+    } catch (error) {
+      console.error("Error serving demo:", error);
+      res.status(500).json({ error: "Failed to serve demo" });
+    }
+  });
+
+  // Match assets manuales (demos/screenshots)
+  app.get("/api/match-assets/:matchId", async (req, res) => {
+    try {
+      const { matchId } = req.params;
+      const kind = req.query.kind as "screenshot" | "demo" | undefined;
+
+      if (!matchId) {
+        return res.status(400).json({ error: "Missing matchId" });
+      }
+
+      const assets = await getManualMatchAssets(matchId, kind);
+      res.json({ assets });
+    } catch (error) {
+      console.error("Error fetching match assets:", error);
+      res.status(500).json({ error: "Failed to fetch match assets" });
+    }
+  });
+
+  app.post("/api/match-assets", async (req, res) => {
+    try {
+      const { matchId, kind, filename, sourcePath } = req.body || {};
+
+      if (!matchId || !kind || !filename) {
+        return res.status(400).json({
+          error: "Missing required fields: matchId, kind, filename"
+        });
+      }
+
+      if (kind !== "screenshot" && kind !== "demo") {
+        return res.status(400).json({ error: "Invalid kind" });
+      }
+
+      const asset = await createManualMatchAsset({
+        matchId,
+        kind,
+        filename,
+        sourcePath,
+      });
+
+      res.json({ asset });
+    } catch (error) {
+      console.error("Error creating match asset:", error);
+      res.status(500).json({ error: "Failed to create match asset" });
     }
   });
   

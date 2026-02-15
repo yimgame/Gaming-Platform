@@ -12,6 +12,10 @@ export interface Screenshot {
   size?: number;
 }
 
+function normalizeMatchType(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
 /**
  * Obtiene todas las screenshots disponibles
  */
@@ -106,24 +110,33 @@ export async function getScreenshotPath(filename: string): Promise<string | null
  */
 interface ParsedScreenshot {
   type: string;
-  map: string;
   date: Date;
 }
 
+function normalizeMapName(value: string): string {
+  return value.toLowerCase().replace(/[_\s-]/g, "");
+}
+
 function parseScreenshotFilename(filename: string): ParsedScreenshot | null {
-  // Formato: TYPE-PLAYER-MAP-YYYY_MM_DD-HH_MM_SS.ext
-  // Captura: tipo de juego, mapa, y fecha/hora
-  const regex = /^([A-Z]+)-[^-]+-([a-zA-Z0-9_]+)-(\d{4})_(\d{2})_(\d{2})-(\d{2})_(\d{2})_(\d{2})/;
+  // Formato base (con segmentos variables): TYPE-...-YYYY_MM_DD-HH_MM_SS.ext
+  // Soporta nombres de jugador/mapa/servidor con guiones.
+  const regex = /^([A-Z0-9]+)-.*-(\d{4})_(\d{2})_(\d{2})-(\d{2})_(\d{2})_(\d{2})(?:\.[^.]+)?$/i;
   const match = filename.match(regex);
   
   if (!match) return null;
   
-  const [, type, map, year, month, day, hour, minute, second] = match;
+  const [, type, year, month, day, hour, minute, second] = match;
   
   return {
     type,
-    map,
-    date: new Date(`${year}-${month}-${day}T${hour}:${minute}:${second}Z`),
+    date: new Date(
+      parseInt(year),
+      parseInt(month) - 1,
+      parseInt(day),
+      parseInt(hour),
+      parseInt(minute),
+      parseInt(second)
+    ),
   };
 }
 
@@ -135,14 +148,12 @@ export async function getScreenshotsByMatch(
   matchType: string,
   matchMap: string,
   matchDatetime: string,
-  timeWindowMinutes: number = 6
+  timeWindowMinutes: number = 4,
+  pinnedFilenames: string[] = []
 ): Promise<Screenshot[]> {
   const allScreenshots = await getAllScreenshots();
-  
-  // Normalizar el nombre del mapa (quitar guiones bajos, espacios, case-insensitive)
-  const normalizeMapName = (map: string) => {
-    return map.toLowerCase().replace(/[_\s-]/g, '');
-  };
+  const pinnedSet = new Set(pinnedFilenames.map(filename => filename.toLowerCase()));
+  const pinnedMatches = allScreenshots.filter(screenshot => pinnedSet.has(screenshot.filename.toLowerCase()));
   
   const normalizedMatchMap = normalizeMapName(matchMap);
   
@@ -200,6 +211,7 @@ export async function getScreenshotsByMatch(
   console.log(`Total screenshots disponibles: ${allScreenshots.length}`);
   
   const correlatedScreenshots = allScreenshots.filter(screenshot => {
+    if (pinnedSet.has(screenshot.filename.toLowerCase())) return false;
     const parsed = parseScreenshotFilename(screenshot.filename);
     
     if (!parsed) {
@@ -208,29 +220,29 @@ export async function getScreenshotsByMatch(
     }
     
     // Comparar tipo de juego (case-insensitive)
-    const typeMatch = parsed.type.toLowerCase() === matchType.toLowerCase();
+    const normalizedScreenshotType = normalizeMatchType(parsed.type);
+    const normalizedMatchType = normalizeMatchType(matchType);
+    const typeMatch = normalizedScreenshotType === normalizedMatchType
+      || normalizedScreenshotType.startsWith(normalizedMatchType)
+      || normalizedMatchType.startsWith(normalizedScreenshotType);
     if (!typeMatch) {
       console.log(`❌ Tipo no coincide: ${screenshot.filename} (screenshot: ${parsed.type}, match: ${matchType})`);
       return false;
     }
     
-    // Comparar mapa (case-insensitive, sin guiones bajos ni espacios)
-    const normalizedScreenshotMap = normalizeMapName(parsed.map);
-    const mapMatch = normalizedScreenshotMap === normalizedMatchMap;
+    // Comparar mapa buscando el nombre del mapa dentro del filename normalizado.
+    // Es más robusto ante segmentos variables (jugador/servidor con guiones).
+    const normalizedFilename = normalizeMapName(screenshot.filename);
+    const mapMatch = normalizedFilename.includes(normalizedMatchMap);
     if (!mapMatch) {
-      console.log(`❌ Mapa no coincide: ${screenshot.filename} (screenshot: ${parsed.map} → ${normalizedScreenshotMap}, match: ${matchMap} → ${normalizedMatchMap})`);
+      console.log(`❌ Mapa no coincide: ${screenshot.filename} (match: ${matchMap} → ${normalizedMatchMap})`);
       return false;
     }
     
-    // Comparar fecha dentro de la ventana de tiempo
-    // Usar timestamp (fecha de modificación) en lugar de la fecha del nombre
-    // porque la captura se toma durante el juego pero se guarda al finalizar
-    if (!screenshot.timestamp) {
-      console.log(`❌ Sin timestamp: ${screenshot.filename}`);
-      return false;
-    }
-    
-    const screenshotTime = screenshot.timestamp;
+    // Comparar fecha dentro de la ventana de tiempo.
+    // Prioriza la fecha embebida en el nombre y usa mtime como fallback.
+    const screenshotTime = parsed.date || screenshot.timestamp;
+    if (!screenshotTime) return false;
     const timeMatch = screenshotTime >= windowStart && screenshotTime <= windowEnd;
     
     if (timeMatch) {
@@ -257,7 +269,15 @@ export async function getScreenshotsByMatch(
     return diff_a - diff_b;
   });
   
-  return correlatedScreenshots;
+  const merged = [...pinnedMatches, ...correlatedScreenshots];
+  const seen = new Set<string>();
+
+  return merged.filter(screenshot => {
+    const key = screenshot.filename.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 /**

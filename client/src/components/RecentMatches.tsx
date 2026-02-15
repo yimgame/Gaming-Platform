@@ -30,6 +30,14 @@ interface Screenshot {
   size?: number;
 }
 
+interface DemoFile {
+  filename: string;
+  url: string;
+  timestamp?: Date;
+  size?: number;
+  protocol?: string;
+}
+
 async function fetchMatches(): Promise<MatchStats[]> {
   const response = await fetch("/api/stats/matches");
   
@@ -61,12 +69,18 @@ function formatDuration(seconds: number) {
 function MatchDetailsDialog({ match, open, onOpenChange }: { match: MatchStats | null; open: boolean; onOpenChange: (open: boolean) => void }) {
   if (!match) return null;
 
-  // Buscar screenshots por nombre de mapa
+  // Buscar screenshots por partida
   const { data: screenshots, isLoading } = useQuery<Screenshot[]>({
-    queryKey: ["map-screenshots", match.map],
+    queryKey: ["match-screenshots", match.id],
     queryFn: async () => {
-      console.log('Buscando capturas para mapa:', match.map);
-      const response = await fetch(`/api/screenshots/map/${encodeURIComponent(match.map)}`);
+      const params = new URLSearchParams({
+        type: match.type,
+        map: match.map,
+        datetime: match.datetime,
+        matchId: match.id,
+      });
+      console.log('Buscando capturas para partida:', match.id);
+      const response = await fetch(`/api/screenshots/match?${params.toString()}`);
       if (!response.ok) {
         console.log('Error en respuesta:', response.status);
         return [];
@@ -76,6 +90,25 @@ function MatchDetailsDialog({ match, open, onOpenChange }: { match: MatchStats |
       return data.screenshots || [];
     },
     enabled: open, // Solo buscar cuando el dialog está abierto
+  });
+
+  const { data: demos, isLoading: isDemosLoading } = useQuery<DemoFile[]>({
+    queryKey: ["match-demos", match.id],
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        type: match.type,
+        map: match.map,
+        datetime: match.datetime,
+        matchId: match.id,
+      });
+      const response = await fetch(`/api/demos/match?${params.toString()}`);
+      if (!response.ok) {
+        return [];
+      }
+      const data = await response.json();
+      return data.demos || [];
+    },
+    enabled: open,
   });
 
   return (
@@ -89,54 +122,83 @@ function MatchDetailsDialog({ match, open, onOpenChange }: { match: MatchStats |
         </DialogHeader>
 
         <div className="space-y-6">
-          {/* Screenshot si existe */}
-          {isLoading ? (
-            <div className="border rounded-lg overflow-hidden bg-muted h-64 flex items-center justify-center">
-              <div className="text-center">
-                <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-2" />
-                <p className="text-sm text-muted-foreground">Buscando capturas...</p>
+          <div className="grid grid-cols-1 lg:grid-cols-7 gap-6">
+            <div className="space-y-4 lg:col-span-2">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm text-muted-foreground">Mapa</p>
+                  <p className="font-bold text-lg">{match.map}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Tipo</p>
+                  <p className="font-bold text-lg">{match.type}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Fecha</p>
+                  <p className="font-bold text-lg">{formatDateTime(match.datetime)}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Duración</p>
+                  <p className="font-bold text-lg">{formatDuration(match.duration)}</p>
+                </div>
               </div>
-            </div>
-          ) : screenshots && screenshots.length > 0 ? (
-            <div className="border rounded-lg overflow-hidden bg-black/90">
-              <img
-                src={screenshots[0].url}
-                alt={screenshots[0].filename}
-                className="w-full h-80 object-contain cursor-pointer hover:opacity-90 transition-opacity"
-                onClick={() => window.open(screenshots[0].url, '_blank')}
-              />
-              <div className="p-2 bg-muted text-xs text-muted-foreground text-center">
-                <ImageIcon className="inline w-3 h-3 mr-1" />
-                Haz clic para ver en grande
-                {screenshots.length > 1 && ` • +${screenshots.length - 1} más`}
-              </div>
-            </div>
-          ) : (
-            <div className="border border-dashed rounded-lg bg-muted/30 h-48 flex items-center justify-center">
-              <div className="text-center">
-                <ImageIcon className="w-12 h-12 mx-auto mb-2 text-muted-foreground/50" />
-                <p className="text-sm text-muted-foreground">No hay capturas para este mapa</p>
-              </div>
-            </div>
-          )}
 
-          {/* Información básica */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <p className="text-sm text-muted-foreground">Mapa</p>
-              <p className="font-bold text-lg">{match.map}</p>
+              <div className="border rounded-lg p-3 bg-muted/30 lg:max-w-[260px]">
+                {isDemosLoading ? (
+                  <p className="text-sm">Buscando demo...</p>
+                ) : demos && demos.length > 0 ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                      <span className="font-medium text-foreground">Demo</span>
+                      <span>{demos[0].protocol ? `Protocolo ${demos[0].protocol}` : "Protocolo N/D"}</span>
+                    </div>
+                    <Button
+                      size="sm"
+                      className="w-1/2 mx-auto"
+                      onClick={() => window.open(demos[0].url, "_blank")}
+                    >
+                      Descargar demo
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                    <span className="font-medium text-foreground">Demo</span>
+                    <span>No asociada</span>
+                  </div>
+                )}
+              </div>
             </div>
-            <div>
-              <p className="text-sm text-muted-foreground">Tipo</p>
-              <p className="font-bold text-lg">{match.type}</p>
-            </div>
-            <div>
-              <p className="text-sm text-muted-foreground">Fecha</p>
-              <p className="font-bold text-lg">{formatDateTime(match.datetime)}</p>
-            </div>
-            <div>
-              <p className="text-sm text-muted-foreground">Duración</p>
-              <p className="font-bold text-lg">{formatDuration(match.duration)}</p>
+
+            <div className="lg:col-span-5 flex items-start justify-center lg:-mt-8">
+              {isLoading ? (
+                <div className="border rounded-lg overflow-hidden bg-muted h-64 lg:h-full min-h-[240px] w-full max-w-[640px] flex items-center justify-center">
+                  <div className="text-center">
+                    <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-2" />
+                    <p className="text-sm text-muted-foreground">Buscando capturas...</p>
+                  </div>
+                </div>
+              ) : screenshots && screenshots.length > 0 ? (
+                <div className="border rounded-lg overflow-hidden bg-black/90 h-full min-h-[240px] w-full max-w-[640px]">
+                  <img
+                    src={screenshots[0].url}
+                    alt={screenshots[0].filename}
+                    className="w-full h-full min-h-[240px] max-h-[340px] object-contain cursor-pointer hover:opacity-90 transition-opacity"
+                    onClick={() => window.open(screenshots[0].url, '_blank')}
+                  />
+                  <div className="p-2 bg-muted text-xs text-muted-foreground text-center">
+                    <ImageIcon className="inline w-3 h-3 mr-1" />
+                    Haz clic para ver en grande
+                    {screenshots.length > 1 && ` • +${screenshots.length - 1} más`}
+                  </div>
+                </div>
+              ) : (
+                <div className="border border-dashed rounded-lg bg-muted/30 h-64 lg:h-full min-h-[240px] w-full max-w-[640px] flex items-center justify-center">
+                  <div className="text-center">
+                    <ImageIcon className="w-12 h-12 mx-auto mb-2 text-muted-foreground/50" />
+                    <p className="text-sm text-muted-foreground">No hay capturas para este mapa</p>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
