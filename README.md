@@ -20,7 +20,7 @@ Full funcional para Quake 3 Arena mod cpma, levanta los stats de partidas, las c
 
 | Servidor Online | Ranking | Partidas Recientes | Galeria |
 | --- | --- | --- | --- |
-| ![Servidor online](q3a-online.jpg) | ![Ranking](q3a-ranking.jpg) | ![Partidas recientes](q3a-recent-match.jpg) | ![Galeria](q3a-gallery.jpg) |
+| ![Servidor online](q3a-online.jpg) | ![Ranking](q3a-ranking.jpg) | ![Partidas recientes](q3a-recent-match-detail.jpg) | ![Galeria](q3a-gallery.jpg) |
 
 ## 🛠️ Stack Tecnologico
 
