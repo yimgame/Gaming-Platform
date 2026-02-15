@@ -13,6 +13,8 @@ Full funcional para Quake 3 Arena mod cpma, levanta los stats de partidas, las c
 - **Estado en tiempo real** para Quake 3 (online, mapa y jugadores)
 - **Rankings, partidas recientes y estadisticas** desde CPMA
 - **Galeria de capturas** asociadas por mapa
+- **Panel Admin** para gestionar juegos, rutas e imagenes
+- **Token admin** para proteger acciones manuales y configuracion sensible
 - **Diseno responsivo** y animaciones estilo cyberpunk
 - **HTTPS gratis** con Certbot + Nginx + renovacion automatica
 
@@ -50,6 +52,7 @@ PORT=5001
 DOMAIN= tu url ip o localhost
 DATABASE_URL=postgres://postgres:postgres@db:5432/app_db
 CERTBOT_EMAIL=tu-email@gmail.com
+ADMIN_TOKEN=pon-un-token-largo-y-seguro
 
 # Quake 3 / CPMA
 STATS_PATH=G:\Games\Quake3\cpma\stats
@@ -62,6 +65,38 @@ Q3A_RCON_PASSWORD=tu-password
 - Por defecto consulta `localhost:27960`
 - Cache de 30 segundos para evitar spam de UDP
 - Endpoint: `GET /api/server/status`
+
+## 🔐 Admin y Token
+
+### Acceso al panel
+
+- URL: `/admin`
+- Ahi activas/desactivas el token admin
+- El token activo se guarda en `localStorage` como `adminToken`
+
+### Para que se usa el token
+
+- Habilitar acciones manuales en partidas (asociar demo/captura)
+- Leer configuracion admin (`/api/admin/config`)
+- Gestionar catalogo de juegos (`/api/admin/games`)
+
+### Endpoints protegidos
+
+- `GET /api/admin/status`
+- `GET /api/admin/config`
+- `GET /api/admin/games`
+- `POST /api/admin/games`
+- `PUT /api/admin/games/:id`
+- `DELETE /api/admin/games/:id`
+- `POST /api/match-assets`
+
+### Header requerido
+
+Enviar el token en:
+
+- Header `x-admin-token`
+
+Si el token no es valido, el backend responde `403`.
 
 ## 🚀 Instalacion Rapida
 
