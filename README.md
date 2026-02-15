@@ -1,22 +1,8 @@
 # Multi Gaming Community
 
-Portal multijuegos con landing page, estado de servidores en tiempo real e interfaz cyberpunk.
+Portal multijuegos con frontend React, backend Node/Express y panel admin para gestionar catálogo de juegos.
 
-Full funcional para Quake 3 Arena mod cpma, levanta los stats de partidas, las capturas, las correlaciona por mapa fecha hora y muestra el status de la partida actual !
-
-**Dominio:** tu url ip o localhost
-**Stack:** React + Node.js + PostgreSQL + Docker + SSL (Let's Encrypt)
-
-## ✨ Caracteristicas
-
-- **Portal multijuegos** con tarjetas de servidores y acceso rapido
-- **Estado en tiempo real** para Quake 3 (online, mapa y jugadores)
-- **Rankings, partidas recientes y estadisticas** desde CPMA
-- **Galeria de capturas** asociadas por mapa
-- **Panel Admin** para gestionar juegos, rutas e imagenes
-- **Token admin** para proteger acciones manuales y configuracion sensible
-- **Diseno responsivo** y animaciones estilo cyberpunk
-- **HTTPS gratis** con Certbot + Nginx + renovacion automatica
+Estado actual: Quake 3 (CPMA) funciona con stats, ranking, partidas recientes, capturas/demos correlacionadas y asociación manual protegida por token.
 
 ## 🖼️ Galeria
 
@@ -24,61 +10,89 @@ Full funcional para Quake 3 Arena mod cpma, levanta los stats de partidas, las c
 | --- | --- | --- | --- |
 | ![Servidor online](q3a-online.jpg) | ![Ranking](q3a-ranking.jpg) | ![Partidas recientes](q3a-recent-match-detail.jpg) | ![Galeria](q3a-gallery.jpg) |
 
-## 🛠️ Stack Tecnologico
 
-**Frontend**
-- React 18 + TypeScript
-- Tailwind CSS + Shadcn UI
-- Framer Motion
-- Wouter
+## Características clave
 
-**Backend**
-- Node.js + Express
-- Drizzle ORM + PostgreSQL
-- Quake 3 UDP getstatus (cache 30s)
+- Catálogo dinámico de juegos (alta, edición y baja desde `/admin`)
+- Página por juego con imagen de tarjeta, fondo, descripción y estado
+- Estado en tiempo real para Quake 3 cpma full funcional (`/api/server/status`)
+- Stats CPMA desde XML (ranking global, partidas históricas, top jugadores)
+- Correlación automática de capturas y demos por tipo/mapa/fecha
+- Asociación manual de assets por partida (solo admin con token por url/admin)
+- Deploy con Docker + Nginx + Certbot (HTTPS)
 
-**DevOps**
-- Vite
-- Docker
-- Certbot (SSL gratis)
+## Stack
 
-## ⚙️ Configuracion
+- Frontend: React 18, TypeScript, Tailwind, shadcn/ui, TanStack Query, Wouter
+- Backend: Node.js, Express, Drizzle ORM, PostgreSQL
+- Infra: Vite, Docker Compose, Nginx, Let's Encrypt
 
-### Variables de Entorno (.env)
+## Configuración (`.env`)
+
+Usa `.env.example` como base.
 
 ```env
 NODE_ENV=production
 PORT=5001
-DOMAIN= tu url ip o localhost
+DOMAIN=tu-dominio-o-ip
 DATABASE_URL=postgres://postgres:postgres@db:5432/app_db
 CERTBOT_EMAIL=tu-email@gmail.com
+
+# Seguridad admin
 ADMIN_TOKEN=pon-un-token-largo-y-seguro
 
-# Quake 3 / CPMA
-STATS_PATH=G:\Games\Quake3\cpma\stats
-SCREENSHOTS_PATH=G:\Games\Quake3\cpma\screenshots
-Q3A_RCON_PASSWORD=tu-password
+# Rutas base (multijuego)
+# QUAKE1_BASE_PATH=G:\Games\Quake\id1
+# QUAKE2_BASE_PATH=G:\Games\Quake2\baseq2
+# QUAKE3_BASE_PATH=G:\Games\Quake3\baseq3
+# QUAKE3_MOD_PATH=G:\Games\Quake3\cpma
+# COUNTER16_BASE_PATH=G:\Games\Counter-Strike 1.6\cstrike
+# CS2_BASE_PATH=G:\Games\cs2\cs2
+# MINECRAFT_BASE_PATH=G:\Games\Minecraft
+
+# Compatibilidad (si ya usas ruta única)
+QUAKE_BASE_PATH=G:\Games\Quake3\cpma
+
+# Overrides explícitos (opcionales)
+# STATS_PATH=G:\Games\Quake3\cpma\stats
+# SCREENSHOTS_PATH=G:\Games\Quake3\cpma\screenshots
+# DEMOS_PATH=G:\Games\Quake3\cpma\demos
 ```
 
-### Quake 3 Status (UDP)
+## Ejecución
 
-- Por defecto consulta `localhost:27960`
-- Cache de 30 segundos para evitar spam de UDP
-- Endpoint: `GET /api/server/status`
+### Desarrollo local (Windows)
 
-## 🔐 Admin y Token
+```bash
+npm install
+start-dev.bat
+```
 
-### Acceso al panel
+También puedes usar:
 
-- URL: `/admin`
-- Ahi activas/desactivas el token admin
-- El token activo se guarda en `localStorage` como `adminToken`
+```bash
+npm run dev
+```
 
-### Para que se usa el token
+Si usas `npm run dev`, define `DATABASE_URL` antes de arrancar.
 
-- Habilitar acciones manuales en partidas (asociar demo/captura)
-- Leer configuracion admin (`/api/admin/config`)
-- Gestionar catalogo de juegos (`/api/admin/games`)
+### Producción (Docker)
+
+```bash
+docker-compose up -d --build
+```
+
+Requisitos mínimos para HTTPS público:
+
+- Dominio apuntando a tu IP pública
+- Puertos 80 y 443 abiertos/forwarded al host
+
+## Admin y Token
+
+- Panel: `/admin`
+- El token se activa/desactiva en el panel y se guarda en `localStorage` como `adminToken`
+- Header requerido en endpoints protegidos: `x-admin-token`
+- Si no es válido: `403`
 
 ### Endpoints protegidos
 
@@ -90,42 +104,33 @@ Q3A_RCON_PASSWORD=tu-password
 - `DELETE /api/admin/games/:id`
 - `POST /api/match-assets`
 
-### Header requerido
+## Stats y assets (Quake 3)
 
-Enviar el token en:
-
-- Header `x-admin-token`
-
-Si el token no es valido, el backend responde `403`.
-
-## 🚀 Instalacion Rapida
-
-Este proyecto puede ejecutarse tanto con **Node/npm** como con **Docker Compose**.
-
-### Docker (Produccion)
+- Stats se leen de XML CPMA (no de PostgreSQL)
+- PostgreSQL se usa para datos de app (por ejemplo asociaciones manuales)
+- Correlación automática por ventana temporal ±4 min
+- Script de backfill:
 
 ```bash
-mkdir -p certs letsencrypt acme-challenge
-docker-compose up -d
+npm run assets:auto-associate
 ```
 
-**Requisitos:**
-- Docker instalado
-- Puertos 80/443 abiertos en el router
-- Dominio apuntando a tu IP
+Endpoints principales:
 
-**Nota sobre certificados:**
-- No hace falta subir `certs/`, `letsencrypt/` ni `acme-challenge/` a GitHub.
-- Los certificados se generan y se renuevan automaticamente via `docker-compose`.
+- `GET /api/stats/matches`
+- `POST /api/stats/ranking/global`
+- `GET /api/stats/server`
+- `GET /api/screenshots/match`
+- `GET /api/demos/match`
 
-### Desarrollo Local
+## Troubleshooting rápido
 
-```bash
-npm install
-npm run dev
-```
-
-Acceso local: http://localhost:5001
+- `5001` ocupado: libera el puerto antes de iniciar
+- `DATABASE_URL must be set`: define `DATABASE_URL` o usa `start-dev.bat`
+- No aparecen juegos en home: backend viejo; reinicia servidor actualizado
+- Stats vacíos: revisa rutas CPMA (`cpma`, no `cmpa`) y `STATS_PATH`
+- Certbot falla validación: verifica DNS + puertos 80/443
+- Falla DB revisar puerto defaul 5432 para postgres
 
 ## 📁 Estructura del Proyecto
 
@@ -139,16 +144,13 @@ yim.servegame.com/
 └── README.md
 ```
 
-## 📚 Documentacion
-
-- [SETUP-CERTBOT-DOCKER.md](SETUP-CERTBOT-DOCKER.md)
-- [COMO-USAR-STATS.md](COMO-USAR-STATS.md)
-- [STATS-SYSTEM.md](STATS-SYSTEM.md)
+## Autor
 
 ## ✨ Autor
 
-Desarrollado con amor por GitHub Copilot (Claude Sonnet 4.5 / Chat-GPT 5.2)
+Desarrollado con amor por GitHub Copilot (Claude Sonnet 4.5 / Chat-GPT 5.3)
 
 🤖 AI-Powered Development for the Quake 3 Community
 
 Just coding 4 fun !!!
+
