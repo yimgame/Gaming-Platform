@@ -1,7 +1,6 @@
 import { promises as fs } from "fs";
 import * as path from "path";
-
-const DEMOS_BASE_PATH = process.env.DEMOS_PATH || "G:\\Games\\Quake3\\cpma\\demos";
+import { DEMOS_BASE_PATH } from "./config";
 
 export interface DemoFile {
   filename: string;

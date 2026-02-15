@@ -5,6 +5,7 @@ import { Gamepad2, Globe, Users } from "lucide-react";
 import { Link } from "wouter";
 
 interface GameCardProps {
+  id: string;
   title: string;
   description: string;
   tags: string[];
@@ -15,6 +16,7 @@ interface GameCardProps {
 }
 
 export default function GameCard({ 
+  id,
   title, 
   description, 
   tags, 
@@ -24,7 +26,6 @@ export default function GameCard({
   playerCount = "0/32"
 }: GameCardProps) {
   const isOnline = status === "online";
-  const gameSlug = title.toLowerCase().replace(/\s+/g, '-').replace(/[()]/g, '');
   
   
   return (
@@ -78,7 +79,7 @@ export default function GameCard({
           </div>
 
           <div className="flex gap-3">
-            <Link href={`/games/${gameSlug}`}>
+            <Link href={`/games/${id}`}>
               <Button variant="outline" size="sm">
                 <Globe className="w-4 h-4 mr-2" />
                 Info

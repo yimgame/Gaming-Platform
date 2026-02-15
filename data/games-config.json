@@ -1,0 +1,196 @@
+[
+  {
+    "id": "quake-3-arena",
+    "title": "Quake 3",
+    "description": "El rey de los arena shooters. Rocket jumps, strafe jumping y torneos mensuales.",
+    "longDescription": "El rey de los arena shooters. Rocket jumps, strafe jumping y torneos mensuales.",
+    "cardImage": "/quake3-hero.jpg",
+    "backgroundImage": "/quake3-hero.jpg",
+    "connectUrl": "yim.servegame.com:27960",
+    "status": "online",
+    "playerCount": "0/16",
+    "tags": [
+      "Arena",
+      "Competitive",
+      "Esports"
+    ],
+    "features": [
+      "Servidor dedicado 24/7",
+      "Estadísticas detalladas",
+      "Rankings globales y por partida",
+      "Múltiples modos: CTF, TDM, FFA",
+      "Mapas clásicos y custom"
+    ],
+    "paths": {
+      "basePath": "G:\\Games\\Quake3",
+      "statsPath": "G:\\Games\\Quake3\\cmpa\\stats",
+      "screenshotsPath": "G:\\Games\\Quake3\\cmpa\\screenshots",
+      "demosPath": "G:\\Games\\Quake3\\cmpa\\demos"
+    },
+    "supportsQuakeStats": true
+  },
+  {
+    "id": "counter-strike-1-6",
+    "title": "Counter Strike 1.6",
+    "description": "El clásico de siempre. Servidor público, mapas custom, baja latencia.",
+    "longDescription": "Counter-Strike 1.6 es el FPS táctico que definió una generación. Combates intensos 5v5, estrategia de equipo y habilidad individual se combinan en el shooter competitivo más icónico de todos los tiempos.",
+    "cardImage": "cs16.jpg",
+    "backgroundImage": "https://images.unsplash.com/photo-1542751371-adc38448a05e?q=80&w=2070&auto=format&fit=crop",
+    "connectUrl": "steam://connect/yim.servegame.com:27015",
+    "status": "online",
+    "playerCount": "12/32",
+    "tags": [
+      "FPS",
+      "Classic",
+      "Fast Paced"
+    ],
+    "features": [
+      "Servidor público dedicado",
+      "Mapas clásicos y custom",
+      "Baja latencia",
+      "Comunidad activa",
+      "Mod personalizado",
+      "Anti-cheat activo"
+    ],
+    "paths": {
+      "basePath": "G:\\Games\\Counter-Strike 1.6\\cstrike"
+    },
+    "supportsQuakeStats": false
+  },
+  {
+    "id": "counter-strike-2",
+    "title": "Counter Strike 2",
+    "description": "La nueva generación de CS. Gráficos mejorados, tickrate dinámico.",
+    "longDescription": "Counter-Strike 2 marca el inicio de una nueva era para el FPS competitivo más grande del mundo. Construido sobre Source 2, ofrece gráficos mejorados, físicas actualizadas y la misma jugabilidad táctica que amas.",
+    "cardImage": "cs2.jpg",
+    "backgroundImage": "https://images.unsplash.com/photo-1616514934832-60298a4bb238?q=80&w=2070&auto=format&fit=crop",
+    "connectUrl": "steam://connect/yim.servegame.com:27016",
+    "status": "online",
+    "playerCount": "5/10",
+    "tags": [
+      "FPS",
+      "Modern",
+      "Competitive"
+    ],
+    "features": [
+      "Gráficos Source 2",
+      "Tickrate dinámico",
+      "Matchmaking competitivo",
+      "Mapas renovados",
+      "Sistema de rangos",
+      "Sub-tick updates"
+    ],
+    "paths": {
+      "basePath": "G:\\Games\\cs2\\cs2"
+    },
+    "supportsQuakeStats": false
+  },
+  {
+    "id": "minecraft-survival",
+    "title": "Minecraft Survival",
+    "description": "Mundo survival infinito. Plugins de protección, economía y eventos.",
+    "longDescription": "Explora un mundo infinito de posibilidades en nuestro servidor Survival. Construye, explora, comercia y sobrevive junto a una comunidad activa. Con plugins de protección y economía para una experiencia equilibrada.",
+    "cardImage": "minecraft.jpg",
+    "backgroundImage": "https://images.unsplash.com/photo-1607525388365-18ae415b3c54?q=80&w=2070&auto=format&fit=crop",
+    "connectUrl": "minecraft://connect/yim.servegame.com",
+    "status": "online",
+    "playerCount": "25/100",
+    "tags": [
+      "Survival",
+      "Sandbox",
+      "Creative"
+    ],
+    "features": [
+      "Mundo infinito",
+      "Protección de terrenos",
+      "Economía del servidor",
+      "Eventos semanales",
+      "Java & Bedrock",
+      "Sin lag, alto rendimiento"
+    ],
+    "paths": {
+      "basePath": "G:\\Games\\Minecraft"
+    },
+    "supportsQuakeStats": false
+  },
+  {
+    "id": "quake-2",
+    "title": "Quake 2",
+    "description": "Acción frenética en la arena. Railgun instagib, CTF y más modos.",
+    "longDescription": "Quake II revolucionó los shooters multijugador con su combate rápido y mapas icónicos. Experimenta la acción clásica con railgun instagib, CTF y más modos competitivos.",
+    "cardImage": "quake2-hero.jpg",
+    "backgroundImage": "https://images.unsplash.com/photo-1552820728-8b83bb6b773f?q=80&w=2070&auto=format&fit=crop",
+    "connectUrl": "#",
+    "status": "maintenance",
+    "playerCount": "0/16",
+    "tags": [
+      "Arena",
+      "Retro",
+      "Fast"
+    ],
+    "features": [
+      "Railgun Instagib",
+      "Capture The Flag",
+      "Mapas clásicos",
+      "Física retro auténtica",
+      "Duelos 1v1",
+      "Competitivo"
+    ],
+    "paths": {
+      "basePath": "G:\\Games\\Quake2\\baseq2"
+    },
+    "supportsQuakeStats": false
+  },
+  {
+    "id": "quake-1",
+    "title": "Quake 1 (QuakeWorld)",
+    "description": "Donde todo comenzó. Física pura, bunny hopping y duelos 1v1.",
+    "longDescription": "El origen de todos los arena shooters. QuakeWorld ofrece la física más pura, bunny hopping perfecto y duelos 1v1 intensos que han resistido la prueba del tiempo.",
+    "cardImage": "quake1-hero.jpg",
+    "backgroundImage": "https://images.unsplash.com/photo-1550745165-9bc0b252726f?q=80&w=2070&auto=format&fit=crop",
+    "connectUrl": "#",
+    "status": "offline",
+    "playerCount": "0/16",
+    "tags": [
+      "Retro",
+      "Classic",
+      "Arena"
+    ],
+    "features": [
+      "QuakeWorld physics",
+      "Bunny hopping",
+      "Duelos 1v1 intensos",
+      "Movimiento técnico",
+      "Arena shooter original",
+      "Leyenda viviente"
+    ],
+    "paths": {
+      "basePath": "G:\\Games\\Quake\\id1"
+    },
+    "supportsQuakeStats": false
+  },
+  {
+    "title": "Quake 4",
+    "description": "Quake 4 es un videojuego de disparos en primera persona ",
+    "longDescription": "Quake 4 es un videojuego de disparos en primera persona lanzado originalmente en 2005, desarrollado por Raven Software en colaboración con id Software. Como secuela directa de Quake II, la historia sigue al marine Matthew Kane en la invasión del planeta alienígena de los Strogg, destacando por su icónica escena de \"stroggificación\" en la que el protagonista es transformado parcialmente en alienígena. ",
+    "cardImage": "/quake4.jpg",
+    "backgroundImage": "/quake4.jpg",
+    "connectUrl": "yim.servegame.com:28004",
+    "status": "maintenance",
+    "playerCount": "0/0",
+    "tags": [
+      "Aventura misterios y disparos sin fin"
+    ],
+    "features": [
+      "Single y multiplayer una aventura inolvidable"
+    ],
+    "paths": {
+      "basePath": "G:\\Games\\Quake4",
+      "statsPath": "G:\\Games\\Quake4",
+      "screenshotsPath": "G:\\Games\\Quake4",
+      "demosPath": "G:\\Games\\Quake4"
+    },
+    "supportsQuakeStats": false,
+    "id": "Quake4"
+  }
+]

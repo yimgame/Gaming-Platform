@@ -2,11 +2,7 @@ import { parseStringPromise } from 'xml2js';
 import fs from 'fs/promises';
 import path from 'path';
 import type { MatchStats, PlayerStats, TeamStats, WeaponStats, ItemStats } from '../shared/stats-schema';
-
-// Ruta base para las estadísticas de CPMA
-// En producción (Docker): usa variable de entorno STATS_PATH
-// En desarrollo (local): usa ruta de Windows
-const STATS_BASE_PATH = process.env.STATS_PATH || 'G:\\Games\\Quake3\\cpma\\stats';
+import { STATS_BASE_PATH } from './config';
 
 function resolveMatchId(xmlPath: string, attrs?: Record<string, string>): string {
   const xmlId = attrs?.id?.toString();

@@ -30,3 +30,23 @@ export async function createManualMatchAsset(input: MatchAssetInput): Promise<Ma
 
   return asset;
 }
+
+export async function createManualMatchAssetIfMissing(input: MatchAssetInput): Promise<MatchAsset | null> {
+  const existing = await db
+    .select()
+    .from(matchAssets)
+    .where(
+      and(
+        eq(matchAssets.matchId, input.matchId),
+        eq(matchAssets.kind, input.kind),
+        eq(matchAssets.filename, input.filename),
+      ),
+    )
+    .limit(1);
+
+  if (existing.length > 0) {
+    return null;
+  }
+
+  return createManualMatchAsset(input);
+}

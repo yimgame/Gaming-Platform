@@ -1,67 +1,31 @@
 import GameCard from "./GameCard";
 import { useQuery } from "@tanstack/react-query";
 import type { QuakeServerStatus } from "@shared/stats-schema";
-
-// Using placeholders for now. User should upload real screenshots later.
-const games = [
-  {
-    title: "Counter Strike 1.6",
-    description: "El clásico de siempre. Servidor público, mapas custom, baja latencia y la mejor comunidad.",
-    tags: ["FPS", "Classic", "Fast Paced"],
-    image: "cs16.jpg", // Imagen personalizada de CS 1.6
-    connectUrl: "steam://connect/yim.servegame.com:27015",
-    status: "online" as const,
-    playerCount: "12/32"
-  },
-  {
-    title: "Counter Strike 2",
-    description: "La nueva generación de CS. Gráficos mejorados, tickrate dinámico y matchmaking competitivo.",
-    tags: ["FPS", "Modern", "Competitive"],
-    image: "cs2.jpg", // Imagen personalizada de CS 2
-    connectUrl: "steam://connect/yim.servegame.com:27016",
-    status: "online" as const,
-    playerCount: "5/10"
-  },
-  {
-    title: "Minecraft Survival",
-    description: "Mundo survival infinito. Plugins de protección, economía y eventos semanales. Versión Java & Bedrock.",
-    tags: ["Survival", "Sandbox", "Creative"],
-    image: "minecraft.jpg", // TODO: ajustar la Imagen personalizada de Minecraft
-    connectUrl: "minecraft://connect/yim.servegame.com",
-    status: "online" as const,
-    playerCount: "25/100"
-  },
-  {
-    title: "Quake 2",
-    description: "Acción frenética en la arena. Railgun instagib, CTF y más modos clásicos.",
-    tags: ["Arena", "Retro", "Fast"],
-    image: "quake2-hero.jpg", // Imagen personalizada de Quake 2
-    connectUrl: "#",
-    status: "maintenance" as const,
-    playerCount: "0/16"
-  },
-  {
-    title: "Quake 3 Arena",
-    description: "El rey de los arena shooters. Rocket jumps, strafe jumping y torneos mensuales.",
-    tags: ["Arena", "Competitive", "Esports"],
-    //image: "https://images.unsplash.com/photo-1509198397868-475647b2a1e5?q=80&w=2047&auto=format&fit=crop",
-    image: "quake3-hero.jpg", // Imagen personalizada de Quake 3
-    connectUrl: "#",
-    status: "offline" as const,
-    playerCount: "0/16"
-  },
-  {
-    title: "Quake 1 (QuakeWorld)",
-    description: "Donde todo comenzó. Física pura, bunny hopping y duelos 1v1 intensos.",
-    tags: ["Retro", "Classic", "Arena"],
-    image: "quake1-hero.jpg", // Imagen personalizada de Quake 1
-    connectUrl: "#",
-    status: "offline" as const,
-    playerCount: "0/16"
-  },
-];
+import type { GameConfig } from "@shared/games-config";
+import { defaultGamesCatalog } from "@/lib/defaultGames";
 
 export default function GamesSection() {
+  const { data: gamesData } = useQuery<{ games: GameConfig[] }>({
+    queryKey: ["games-catalog"],
+    queryFn: async () => {
+      try {
+        const response = await fetch("/api/games");
+        if (!response.ok) {
+          return { games: defaultGamesCatalog };
+        }
+
+        const payload = await response.json();
+        if (!payload?.games || !Array.isArray(payload.games) || payload.games.length === 0) {
+          return { games: defaultGamesCatalog };
+        }
+
+        return payload;
+      } catch {
+        return { games: defaultGamesCatalog };
+      }
+    },
+  });
+
   // Consultar estado del servidor Quake 3 en tiempo real
   const { data: q3aStatus } = useQuery<QuakeServerStatus>({
     queryKey: ["quake-server-status"],
@@ -75,9 +39,11 @@ export default function GamesSection() {
     refetchInterval: 30000, // Actualizar cada 30 segundos
   });
 
+  const games = gamesData?.games || [];
+
   // Actualizar datos de Quake 3 con el estado real del servidor
   const gamesWithLiveData = games.map(game => {
-    if (game.title === "Quake 3 Arena" && q3aStatus) {
+    if (game.supportsQuakeStats && q3aStatus) {
       return {
         ...game,
         status: q3aStatus.online ? "online" as const : "offline" as const,
@@ -114,7 +80,17 @@ export default function GamesSection() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
           {gamesWithLiveData.map((game) => (
-            <GameCard key={game.title} {...game} />
+            <GameCard
+              key={game.id}
+              id={game.id}
+              title={game.title}
+              description={game.description}
+              tags={game.tags}
+              image={game.cardImage}
+              connectUrl={game.connectUrl}
+              status={game.status}
+              playerCount={game.playerCount}
+            />
           ))}
         </div>
       </div>

@@ -21,138 +21,36 @@ import RecentMatches from "@/components/RecentMatches";
 import ServerStatsOverview from "@/components/ServerStatsOverview";
 import ScreenshotsGallery from "@/components/ScreenshotsGallery";
 import type { QuakeServerStatus } from "@shared/stats-schema";
-
-interface GameInfo {
-  id: string;
-  title: string;
-  description: string;
-  longDescription: string;
-  image: string;
-  connectUrl?: string;
-  status: "online" | "offline" | "maintenance";
-  playerCount: string;
-  features: string[];
-  videos?: string[];
-  screenshots?: string[];
-}
-
-const gamesInfo: Record<string, GameInfo> = {
-  "quake-3-arena": {
-    id: "quake-3-arena",
-    title: "Quake 3 Arena",
-    description: "El rey de los arena shooters. Rocket jumps, strafe jumping y torneos mensuales.",
-    longDescription: "Quake III Arena es un shooter multijugador de ritmo rápido que definió el género de los arena shooters. Con su física única, movimiento avanzado y combate frenético, sigue siendo uno de los juegos competitivos más emocionantes.",
-    image: "/quake3-hero.jpg",
-    connectUrl: "#",
-    status: "offline",
-    playerCount: "0/16",
-    features: [
-      "CPMA (Challenge ProMode Arena)",
-      "Servidor dedicado 24/7",
-      "Estadísticas detalladas",
-      "Rankings globales y por partida",
-      "Múltiples modos: CTF, TDM, FFA",
-      "Mapas clásicos y custom"
-    ],
-    screenshots: [],
-    videos: [],
-  },
-  "counter-strike-1-6": {
-    id: "counter-strike-1-6",
-    title: "Counter Strike 1.6",
-    description: "El clásico de siempre. Servidor público, mapas custom, baja latencia.",
-    longDescription: "Counter-Strike 1.6 es el FPS táctico que definió una generación. Combates intensos 5v5, estrategia de equipo y habilidad individual se combinan en el shooter competitivo más icónico de todos los tiempos.",
-    image: "https://images.unsplash.com/photo-1542751371-adc38448a05e?q=80&w=2070&auto=format&fit=crop",
-    connectUrl: "steam://connect/yim.servegame.com:27015",
-    status: "online",
-    playerCount: "12/32",
-    features: [
-      "Servidor público dedicado",
-      "Mapas clásicos y custom",
-      "Baja latencia",
-      "Comunidad activa",
-      "Mod personalizado",
-      "Anti-cheat activo"
-    ],
-  },
-  "counter-strike-2": {
-    id: "counter-strike-2",
-    title: "Counter Strike 2",
-    description: "La nueva generación de CS. Gráficos mejorados, tickrate dinámico.",
-    longDescription: "Counter-Strike 2 marca el inicio de una nueva era para el FPS competitivo más grande del mundo. Construido sobre Source 2, ofrece gráficos mejorados, físicas actualizadas y la misma jugabilidad táctica que amas.",
-    image: "https://images.unsplash.com/photo-1616514934832-60298a4bb238?q=80&w=2070&auto=format&fit=crop",
-    connectUrl: "steam://connect/yim.servegame.com:27016",
-    status: "online",
-    playerCount: "5/10",
-    features: [
-      "Gráficos Source 2",
-      "Tickrate dinámico",
-      "Matchmaking competitivo",
-      "Mapas renovados",
-      "Sistema de rangos",
-      "Sub-tick updates"
-    ],
-  },
-  "minecraft-survival": {
-    id: "minecraft-survival",
-    title: "Minecraft Survival",
-    description: "Mundo survival infinito. Plugins de protección, economía y eventos.",
-    longDescription: "Explora un mundo infinito de posibilidades en nuestro servidor Survival. Construye, explora, comercia y sobrevive junto a una comunidad activa. Con plugins de protección y economía para una experiencia equilibrada.",
-    image: "https://images.unsplash.com/photo-1607525388365-18ae415b3c54?q=80&w=2070&auto=format&fit=crop",
-    connectUrl: "minecraft://connect/yim.servegame.com",
-    status: "online",
-    playerCount: "25/100",
-    features: [
-      "Mundo infinito",
-      "Protección de terrenos",
-      "Economía del servidor",
-      "Eventos semanales",
-      "Java & Bedrock",
-      "Sin lag, alto rendimiento"
-    ],
-  },
-  "quake-2": {
-    id: "quake-2",
-    title: "Quake 2",
-    description: "Acción frenética en la arena. Railgun instagib, CTF y más modos.",
-    longDescription: "Quake II revolucionó los shooters multijugador con su combate rápido y mapas icónicos. Experimenta la acción clásica con railgun instagib, CTF y más modos competitivos.",
-    image: "https://images.unsplash.com/photo-1552820728-8b83bb6b773f?q=80&w=2070&auto=format&fit=crop",
-    connectUrl: "#",
-    status: "maintenance",
-    playerCount: "0/16",
-    features: [
-      "Railgun Instagib",
-      "Capture The Flag",
-      "Mapas clásicos",
-      "Física retro auténtica",
-      "Duelos 1v1",
-      "Competitivo"
-    ],
-  },
-  "quake-1": {
-    id: "quake-1",
-    title: "Quake 1 (QuakeWorld)",
-    description: "Donde todo comenzó. Física pura, bunny hopping y duelos 1v1.",
-    longDescription: "El origen de todos los arena shooters. QuakeWorld ofrece la física más pura, bunny hopping perfecto y duelos 1v1 intensos que han resistido la prueba del tiempo.",
-    image: "https://images.unsplash.com/photo-1550745165-9bc0b252726f?q=80&w=2070&auto=format&fit=crop",
-    connectUrl: "#",
-    status: "offline",
-    playerCount: "0/16",
-    features: [
-      "QuakeWorld physics",
-      "Bunny hopping",
-      "Duelos 1v1 intensos",
-      "Movimiento técnico",
-      "Arena shooter original",
-      "Leyenda viviente"
-    ],
-  },
-};
+import type { GameConfig } from "@shared/games-config";
+import { defaultGamesCatalog } from "@/lib/defaultGames";
 
 export default function GameDetailPage() {
   const [, params] = useRoute("/games/:gameId");
   const gameId = params?.gameId || "";
-  const game = gamesInfo[gameId];
+
+  const { data: gamesData } = useQuery<{ games: GameConfig[] }>({
+    queryKey: ["games-catalog"],
+    queryFn: async () => {
+      try {
+        const response = await fetch("/api/games");
+        if (!response.ok) {
+          return { games: defaultGamesCatalog };
+        }
+
+        const payload = await response.json();
+        if (!payload?.games || !Array.isArray(payload.games) || payload.games.length === 0) {
+          return { games: defaultGamesCatalog };
+        }
+
+        return payload;
+      } catch {
+        return { games: defaultGamesCatalog };
+      }
+    },
+  });
+
+  const game = gamesData?.games?.find((item) => item.id === gameId);
+  const supportsQuakeStats = Boolean(game?.supportsQuakeStats);
 
   // Consultar estado del servidor para Quake 3
   const { data: serverStatus } = useQuery<QuakeServerStatus>({
@@ -164,18 +62,26 @@ export default function GameDetailPage() {
       }
       return response.json();
     },
-    enabled: gameId === "quake-3-arena",
+    enabled: supportsQuakeStats,
     refetchInterval: 30000, // Actualizar cada 30 segundos
   });
 
   // Usar datos del servidor si está disponible (solo para Quake 3)
-  const status = gameId === "quake-3-arena" && serverStatus 
+  const status = supportsQuakeStats && serverStatus 
     ? (serverStatus.online ? "online" : "offline")
     : game?.status || "offline";
   
-  const playerCount = gameId === "quake-3-arena" && serverStatus?.online
+  const playerCount = supportsQuakeStats && serverStatus?.online
     ? `${serverStatus.clients || 0}/${serverStatus.maxClients || 16}`
     : game?.playerCount || "0/16";
+
+  if (!gamesData) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <p className="text-muted-foreground">Cargando juego...</p>
+      </div>
+    );
+  }
 
   if (!game) {
     return (
@@ -199,7 +105,7 @@ export default function GameDetailPage() {
       <div className="relative h-96 overflow-hidden">
         <div className="absolute inset-0">
           <img 
-            src={game.image} 
+            src={game.backgroundImage} 
             alt={game.title}
             className="w-full h-full object-cover"
           />
@@ -231,7 +137,7 @@ export default function GameDetailPage() {
                   <Users className="w-4 h-4 mr-2" />
                   <span>{playerCount} Players</span>
                 </div>
-                {gameId === "quake-3-arena" && serverStatus?.online && serverStatus.mapname && (
+                {supportsQuakeStats && serverStatus?.online && serverStatus.mapname && (
                   <div className="flex items-center text-muted-foreground">
                     <Target className="w-4 h-4 mr-2" />
                     <span>{serverStatus.mapname}</span>
@@ -259,15 +165,15 @@ export default function GameDetailPage() {
               <Activity className="w-4 h-4 mr-2" />
               Información
             </TabsTrigger>
-            <TabsTrigger value="stats" disabled={gameId !== "quake-3-arena"}>
+            <TabsTrigger value="stats" disabled={!supportsQuakeStats}>
               <Trophy className="w-4 h-4 mr-2" />
               Rankings
             </TabsTrigger>
-            <TabsTrigger value="matches" disabled={gameId !== "quake-3-arena"}>
+            <TabsTrigger value="matches" disabled={!supportsQuakeStats}>
               <Calendar className="w-4 h-4 mr-2" />
               Partidas
             </TabsTrigger>
-            <TabsTrigger value="media" disabled={gameId !== "quake-3-arena"}>
+            <TabsTrigger value="media" disabled={!supportsQuakeStats}>
               <Target className="w-4 h-4 mr-2" />
               Media
             </TabsTrigger>
@@ -311,10 +217,10 @@ export default function GameDetailPage() {
                   <Target className="w-8 h-8 text-primary" />
                   <div>
                     <p className="text-sm text-muted-foreground">
-                      {gameId === "quake-3-arena" && serverStatus?.online ? "Mapa actual" : "Latencia"}
+                      {supportsQuakeStats && serverStatus?.online ? "Mapa actual" : "Latencia"}
                     </p>
                     <p className="text-lg font-bold">
-                      {gameId === "quake-3-arena" && serverStatus?.online 
+                      {supportsQuakeStats && serverStatus?.online 
                         ? serverStatus.mapname || "N/A"
                         : "~15ms"}
                     </p>
@@ -323,7 +229,7 @@ export default function GameDetailPage() {
               </div>
               
               {/* Lista de jugadores en tiempo real (solo Quake 3) */}
-              {gameId === "quake-3-arena" && serverStatus?.online && serverStatus.players && serverStatus.players.length > 0 && (
+              {supportsQuakeStats && serverStatus?.online && serverStatus.players && serverStatus.players.length > 0 && (
                 <div className="mt-6">
                   <h3 className="text-lg font-bold mb-4 flex items-center">
                     <Users className="w-5 h-5 mr-2 text-primary" />
@@ -360,7 +266,7 @@ export default function GameDetailPage() {
           </TabsContent>
 
           <TabsContent value="media">
-            {gameId === "quake-3-arena" ? (
+            {supportsQuakeStats ? (
               <ScreenshotsGallery />
             ) : (
               <Card className="p-6">

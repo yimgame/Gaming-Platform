@@ -13,8 +13,12 @@ echo.
 set NODE_ENV=development
 set PORT=5001
 
+if "%DB_PORT%"=="" (
+	set DB_PORT=5433
+)
+
 if "%DATABASE_URL%"=="" (
-	set DATABASE_URL=postgres://postgres:postgres@localhost:5432/app_db
+	set DATABASE_URL=postgres://postgres:postgres@localhost:%DB_PORT%/app_db
 )
 
 echo DB: %DATABASE_URL%

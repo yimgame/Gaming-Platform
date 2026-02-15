@@ -1,8 +1,6 @@
 import { promises as fs } from 'fs';
 import * as path from 'path';
-
-// Ruta base para screenshots
-const SCREENSHOTS_BASE_PATH = process.env.SCREENSHOTS_PATH || 'G:\\Games\\Quake3\\cpma\\screenshots';
+import { SCREENSHOTS_BASE_PATH } from './config';
 
 export interface Screenshot {
   filename: string;

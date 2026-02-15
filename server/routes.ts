@@ -26,14 +26,132 @@ import {
   getDemosByMatch
 } from "./demos-service";
 import {
-  createManualMatchAsset,
+  createManualMatchAssetIfMissing,
   getManualMatchAssets
 } from "./match-assets-service";
+import {
+  createGameConfig,
+  deleteGameConfig,
+  getGamesConfig,
+  updateGameConfig,
+} from "./games-config-service";
+import {
+  ADMIN_TOKEN,
+  COUNTER16_BASE_PATH,
+  CS2_BASE_PATH,
+  DEMOS_BASE_PATH,
+  MINECRAFT_BASE_PATH,
+  QUAKE2_BASE_PATH,
+  QUAKE3_BASE_PATH,
+  QUAKE_BASE_PATH,
+  SCREENSHOTS_BASE_PATH,
+  STATS_BASE_PATH,
+} from "./config";
 import { getServerStatus, refreshServerStatus } from "./q3a-status";
 import { RankingFiltersSchema } from "../shared/stats-schema";
 import fs from "fs";
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  const isAdminRequest = (token: string | undefined) => {
+    if (!ADMIN_TOKEN) return false;
+    return token === ADMIN_TOKEN;
+  };
+
+  app.get("/api/admin/status", async (req, res) => {
+    const token = req.header("x-admin-token") || req.query.adminToken as string | undefined;
+    const enabled = isAdminRequest(token);
+    res.json({ enabled });
+  });
+
+  app.get("/api/admin/config", async (req, res) => {
+    const token = req.header("x-admin-token") || req.query.adminToken as string | undefined;
+    if (!isAdminRequest(token)) {
+      return res.status(403).json({ error: "Admin token required" });
+    }
+
+    res.json({
+      quakeBasePath: QUAKE_BASE_PATH,
+      quake2BasePath: QUAKE2_BASE_PATH,
+      quake3BasePath: QUAKE3_BASE_PATH,
+      counter16BasePath: COUNTER16_BASE_PATH,
+      cs2BasePath: CS2_BASE_PATH,
+      minecraftBasePath: MINECRAFT_BASE_PATH,
+      statsPath: STATS_BASE_PATH,
+      screenshotsPath: SCREENSHOTS_BASE_PATH,
+      demosPath: DEMOS_BASE_PATH,
+    });
+  });
+
+  app.get("/api/games", async (_req, res) => {
+    try {
+      const games = await getGamesConfig();
+      res.json({ games });
+    } catch (error) {
+      console.error("Error fetching games config:", error);
+      res.status(500).json({ error: "Failed to fetch games" });
+    }
+  });
+
+  app.get("/api/admin/games", async (req, res) => {
+    const token = req.header("x-admin-token") || req.query.adminToken as string | undefined;
+    if (!isAdminRequest(token)) {
+      return res.status(403).json({ error: "Admin token required" });
+    }
+
+    try {
+      const games = await getGamesConfig();
+      res.json({ games });
+    } catch (error) {
+      console.error("Error fetching admin games config:", error);
+      res.status(500).json({ error: "Failed to fetch admin games" });
+    }
+  });
+
+  app.post("/api/admin/games", async (req, res) => {
+    const token = req.header("x-admin-token") || req.query.adminToken as string | undefined;
+    if (!isAdminRequest(token)) {
+      return res.status(403).json({ error: "Admin token required" });
+    }
+
+    try {
+      const game = await createGameConfig(req.body);
+      res.status(201).json({ game });
+    } catch (error) {
+      console.error("Error creating game config:", error);
+      res.status(400).json({ error: "Failed to create game config" });
+    }
+  });
+
+  app.put("/api/admin/games/:id", async (req, res) => {
+    const token = req.header("x-admin-token") || req.query.adminToken as string | undefined;
+    if (!isAdminRequest(token)) {
+      return res.status(403).json({ error: "Admin token required" });
+    }
+
+    try {
+      const game = await updateGameConfig(req.params.id, req.body);
+      res.json({ game });
+    } catch (error) {
+      console.error("Error updating game config:", error);
+      res.status(400).json({ error: "Failed to update game config" });
+    }
+  });
+
+  app.delete("/api/admin/games/:id", async (req, res) => {
+    const token = req.header("x-admin-token") || req.query.adminToken as string | undefined;
+    if (!isAdminRequest(token)) {
+      return res.status(403).json({ error: "Admin token required" });
+    }
+
+    try {
+      await deleteGameConfig(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting game config:", error);
+      res.status(400).json({ error: "Failed to delete game config" });
+    }
+  });
+
   // Estadísticas de CPMA
   
   // Obtener todas las partidas
@@ -298,6 +416,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/match-assets", async (req, res) => {
     try {
+      const token = req.header("x-admin-token") || req.body?.adminToken as string | undefined;
+      if (!isAdminRequest(token)) {
+        return res.status(403).json({ error: "Admin token required" });
+      }
+
       const { matchId, kind, filename, sourcePath } = req.body || {};
 
       if (!matchId || !kind || !filename) {
@@ -310,14 +433,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "Invalid kind" });
       }
 
-      const asset = await createManualMatchAsset({
+      const asset = await createManualMatchAssetIfMissing({
         matchId,
         kind,
         filename,
         sourcePath,
       });
 
-      res.json({ asset });
+      res.json({
+        asset,
+        created: Boolean(asset),
+      });
     } catch (error) {
       console.error("Error creating match asset:", error);
       res.status(500).json({ error: "Failed to create match asset" });

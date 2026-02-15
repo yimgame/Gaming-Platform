@@ -1,0 +1,141 @@
+import type { GameConfig } from "@shared/games-config";
+
+export const defaultGamesCatalog: GameConfig[] = [
+  {
+    id: "quake-3-arena",
+    title: "Quake 3 Arena",
+    description: "El rey de los arena shooters. Rocket jumps, strafe jumping y torneos mensuales.",
+    longDescription:
+      "Quake III Arena es un shooter multijugador de ritmo rápido que definió el género de los arena shooters. Con su física única, movimiento avanzado y combate frenético, sigue siendo uno de los juegos competitivos más emocionantes.",
+    cardImage: "/quake3-hero.jpg",
+    backgroundImage: "/quake3-hero.jpg",
+    connectUrl: "#",
+    status: "offline",
+    playerCount: "0/16",
+    tags: ["Arena", "Competitive", "Esports"],
+    features: [
+      "CPMA (Challenge ProMode Arena)",
+      "Servidor dedicado 24/7",
+      "Estadísticas detalladas",
+      "Rankings globales y por partida",
+      "Múltiples modos: CTF, TDM, FFA",
+      "Mapas clásicos y custom",
+    ],
+    supportsQuakeStats: true,
+  },
+  {
+    id: "counter-strike-1-6",
+    title: "Counter Strike 1.6",
+    description: "El clásico de siempre. Servidor público, mapas custom, baja latencia.",
+    longDescription:
+      "Counter-Strike 1.6 es el FPS táctico que definió una generación. Combates intensos 5v5, estrategia de equipo y habilidad individual se combinan en el shooter competitivo más icónico de todos los tiempos.",
+    cardImage: "cs16.jpg",
+    backgroundImage:
+      "https://images.unsplash.com/photo-1542751371-adc38448a05e?q=80&w=2070&auto=format&fit=crop",
+    connectUrl: "steam://connect/yim.servegame.com:27015",
+    status: "online",
+    playerCount: "12/32",
+    tags: ["FPS", "Classic", "Fast Paced"],
+    features: [
+      "Servidor público dedicado",
+      "Mapas clásicos y custom",
+      "Baja latencia",
+      "Comunidad activa",
+      "Mod personalizado",
+      "Anti-cheat activo",
+    ],
+    supportsQuakeStats: false,
+  },
+  {
+    id: "counter-strike-2",
+    title: "Counter Strike 2",
+    description: "La nueva generación de CS. Gráficos mejorados, tickrate dinámico.",
+    longDescription:
+      "Counter-Strike 2 marca el inicio de una nueva era para el FPS competitivo más grande del mundo. Construido sobre Source 2, ofrece gráficos mejorados, físicas actualizadas y la misma jugabilidad táctica que amas.",
+    cardImage: "cs2.jpg",
+    backgroundImage:
+      "https://images.unsplash.com/photo-1616514934832-60298a4bb238?q=80&w=2070&auto=format&fit=crop",
+    connectUrl: "steam://connect/yim.servegame.com:27016",
+    status: "online",
+    playerCount: "5/10",
+    tags: ["FPS", "Modern", "Competitive"],
+    features: [
+      "Gráficos Source 2",
+      "Tickrate dinámico",
+      "Matchmaking competitivo",
+      "Mapas renovados",
+      "Sistema de rangos",
+      "Sub-tick updates",
+    ],
+    supportsQuakeStats: false,
+  },
+  {
+    id: "minecraft-survival",
+    title: "Minecraft Survival",
+    description: "Mundo survival infinito. Plugins de protección, economía y eventos.",
+    longDescription:
+      "Explora un mundo infinito de posibilidades en nuestro servidor Survival. Construye, explora, comercia y sobrevive junto a una comunidad activa. Con plugins de protección y economía para una experiencia equilibrada.",
+    cardImage: "minecraft.jpg",
+    backgroundImage:
+      "https://images.unsplash.com/photo-1607525388365-18ae415b3c54?q=80&w=2070&auto=format&fit=crop",
+    connectUrl: "minecraft://connect/yim.servegame.com",
+    status: "online",
+    playerCount: "25/100",
+    tags: ["Survival", "Sandbox", "Creative"],
+    features: [
+      "Mundo infinito",
+      "Protección de terrenos",
+      "Economía del servidor",
+      "Eventos semanales",
+      "Java & Bedrock",
+      "Sin lag, alto rendimiento",
+    ],
+    supportsQuakeStats: false,
+  },
+  {
+    id: "quake-2",
+    title: "Quake 2",
+    description: "Acción frenética en la arena. Railgun instagib, CTF y más modos.",
+    longDescription:
+      "Quake II revolucionó los shooters multijugador con su combate rápido y mapas icónicos. Experimenta la acción clásica con railgun instagib, CTF y más modos competitivos.",
+    cardImage: "quake2-hero.jpg",
+    backgroundImage:
+      "https://images.unsplash.com/photo-1552820728-8b83bb6b773f?q=80&w=2070&auto=format&fit=crop",
+    connectUrl: "#",
+    status: "maintenance",
+    playerCount: "0/16",
+    tags: ["Arena", "Retro", "Fast"],
+    features: [
+      "Railgun Instagib",
+      "Capture The Flag",
+      "Mapas clásicos",
+      "Física retro auténtica",
+      "Duelos 1v1",
+      "Competitivo",
+    ],
+    supportsQuakeStats: false,
+  },
+  {
+    id: "quake-1",
+    title: "Quake 1 (QuakeWorld)",
+    description: "Donde todo comenzó. Física pura, bunny hopping y duelos 1v1.",
+    longDescription:
+      "El origen de todos los arena shooters. QuakeWorld ofrece la física más pura, bunny hopping perfecto y duelos 1v1 intensos que han resistido la prueba del tiempo.",
+    cardImage: "quake1-hero.jpg",
+    backgroundImage:
+      "https://images.unsplash.com/photo-1550745165-9bc0b252726f?q=80&w=2070&auto=format&fit=crop",
+    connectUrl: "#",
+    status: "offline",
+    playerCount: "0/16",
+    tags: ["Retro", "Classic", "Arena"],
+    features: [
+      "QuakeWorld physics",
+      "Bunny hopping",
+      "Duelos 1v1 intensos",
+      "Movimiento técnico",
+      "Arena shooter original",
+      "Leyenda viviente",
+    ],
+    supportsQuakeStats: false,
+  },
+];

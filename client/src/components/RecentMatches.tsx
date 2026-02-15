@@ -1,7 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
@@ -20,7 +22,7 @@ import {
 } from "@/components/ui/table";
 import { Calendar, Image as ImageIcon } from "lucide-react";
 import type { MatchStats } from "@shared/stats-schema";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 interface Screenshot {
   filename: string;
@@ -68,6 +70,78 @@ function formatDuration(seconds: number) {
 
 function MatchDetailsDialog({ match, open, onOpenChange }: { match: MatchStats | null; open: boolean; onOpenChange: (open: boolean) => void }) {
   if (!match) return null;
+
+  const queryClient = useQueryClient();
+  const [manualScreenshotFilename, setManualScreenshotFilename] = useState("");
+  const [manualDemoFilename, setManualDemoFilename] = useState("");
+  const [adminToken, setAdminToken] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+    const stored = window.localStorage.getItem("adminToken") || "";
+    setAdminToken(stored);
+  }, [open]);
+
+  const adminStatusQuery = useQuery<{ enabled: boolean }>({
+    queryKey: ["admin-status", adminToken],
+    queryFn: async () => {
+      const response = await fetch("/api/admin/status", {
+        headers: {
+          "x-admin-token": adminToken,
+        },
+      });
+
+      if (!response.ok) {
+        return { enabled: false };
+      }
+
+      return response.json();
+    },
+    enabled: open && adminToken.trim().length > 0,
+  });
+
+  const adminEnabled = Boolean(adminStatusQuery.data?.enabled);
+
+  const associateAssetMutation = useMutation({
+    mutationFn: async ({ kind, filename }: { kind: "screenshot" | "demo"; filename: string }) => {
+      const response = await fetch("/api/match-assets", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          matchId: match.id,
+          kind,
+          filename,
+          adminToken,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("No se pudo asociar el archivo");
+      }
+
+      return response.json();
+    },
+    onSuccess: (_data, variables) => {
+      if (variables.kind === "screenshot") {
+        setManualScreenshotFilename("");
+        queryClient.invalidateQueries({ queryKey: ["match-screenshots", match.id] });
+      } else {
+        setManualDemoFilename("");
+        queryClient.invalidateQueries({ queryKey: ["match-demos", match.id] });
+      }
+    },
+  });
+
+  const handleManualAssociate = (kind: "screenshot" | "demo") => {
+    const filename = (kind === "screenshot" ? manualScreenshotFilename : manualDemoFilename).trim();
+    if (!filename) {
+      window.alert("Ingresá el nombre del archivo para asociar");
+      return;
+    }
+    associateAssetMutation.mutate({ kind, filename });
+  };
 
   // Buscar screenshots por partida
   const { data: screenshots, isLoading } = useQuery<Screenshot[]>({
@@ -166,6 +240,26 @@ function MatchDetailsDialog({ match, open, onOpenChange }: { match: MatchStats |
                     <span>No asociada</span>
                   </div>
                 )}
+
+                {adminEnabled && (
+                  <div className="mt-3 space-y-2">
+                    <Input
+                      value={manualDemoFilename}
+                      onChange={(event) => setManualDemoFilename(event.target.value)}
+                      placeholder="Archivo demo (.dm_68)"
+                      className="h-8 text-xs"
+                    />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="w-full"
+                      disabled={associateAssetMutation.isPending}
+                      onClick={() => handleManualAssociate("demo")}
+                    >
+                      Asociar demo manual
+                    </Button>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -190,12 +284,50 @@ function MatchDetailsDialog({ match, open, onOpenChange }: { match: MatchStats |
                     Haz clic para ver en grande
                     {screenshots.length > 1 && ` • +${screenshots.length - 1} más`}
                   </div>
+                  {adminEnabled && (
+                    <div className="p-2 border-t border-border bg-muted/30 space-y-2">
+                      <Input
+                        value={manualScreenshotFilename}
+                        onChange={(event) => setManualScreenshotFilename(event.target.value)}
+                        placeholder="Archivo screenshot (.jpg/.png)"
+                        className="h-8 text-xs"
+                      />
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="w-full"
+                        disabled={associateAssetMutation.isPending}
+                        onClick={() => handleManualAssociate("screenshot")}
+                      >
+                        Asociar captura manual
+                      </Button>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="border border-dashed rounded-lg bg-muted/30 h-64 lg:h-full min-h-[240px] w-full max-w-[640px] flex items-center justify-center">
-                  <div className="text-center">
+                  <div className="text-center p-3 w-full max-w-sm space-y-3">
                     <ImageIcon className="w-12 h-12 mx-auto mb-2 text-muted-foreground/50" />
                     <p className="text-sm text-muted-foreground">No hay capturas para este mapa</p>
+                    {adminEnabled && (
+                      <>
+                        <Input
+                          value={manualScreenshotFilename}
+                          onChange={(event) => setManualScreenshotFilename(event.target.value)}
+                          placeholder="Archivo screenshot (.jpg/.png)"
+                          className="h-8 text-xs"
+                        />
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="w-full"
+                          disabled={associateAssetMutation.isPending}
+                          onClick={() => handleManualAssociate("screenshot")}
+                        >
+                          Asociar captura manual
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </div>
               )}
