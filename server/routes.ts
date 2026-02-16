@@ -1,5 +1,6 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
+import path from "node:path";
 import { storage } from "./storage";
 import { 
   calculateGlobalRanking, 
@@ -55,10 +56,55 @@ import {
 } from "./config";
 import { getServerStatus, refreshServerStatus } from "./q3a-status";
 import { getMapLevelshot } from "./levelshots-service";
+import {
+  deleteLevelshotOverride,
+  getLevelshotOverride,
+  listLevelshotOverrides,
+  upsertLevelshotOverride,
+} from "./levelshots-overrides-service";
 import { RankingFiltersSchema } from "../shared/stats-schema";
 import fs from "fs";
+import multer from "multer";
+
+const LEVELSHOTS_UPLOAD_DIR = path.resolve(process.cwd(), "data", "levelshots-images");
+
+const ensureLevelshotsUploadDir = async () => {
+  await fs.promises.mkdir(LEVELSHOTS_UPLOAD_DIR, { recursive: true });
+};
+
+const sanitizeMapName = (value: string) => value.toLowerCase().replace(/[^a-z0-9_-]/g, "");
+
+const levelshotsUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => {
+      cb(null, LEVELSHOTS_UPLOAD_DIR);
+    },
+    filename: (req, file, cb) => {
+      const requestedMap = String(req.body?.mapName || "").trim();
+      const safeMap = sanitizeMapName(requestedMap) || "map";
+      const extensionFromName = path.extname(file.originalname || "").toLowerCase();
+      const extension = [".jpg", ".jpeg", ".png", ".tga"].includes(extensionFromName)
+        ? extensionFromName
+        : ".jpg";
+
+      cb(null, `${safeMap}-${Date.now()}${extension}`);
+    },
+  }),
+  fileFilter: (_req, file, cb) => {
+    if ((file.mimetype || "").startsWith("image/")) {
+      cb(null, true);
+      return;
+    }
+    cb(new Error("Solo se permiten archivos de imagen"));
+  },
+  limits: {
+    fileSize: 8 * 1024 * 1024,
+  },
+});
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  await ensureLevelshotsUploadDir();
+
   const getErrorMessage = (error: unknown) => {
     if (error instanceof Error) return error.message;
     try {
@@ -175,6 +221,90 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       logRouteError("Error fetching admin contact messages", error);
       res.status(500).json({ error: "Failed to fetch contact messages" });
+    }
+  });
+
+  app.get("/api/admin/levelshots", async (req, res) => {
+    const token = req.header("x-admin-token") || req.query.adminToken as string | undefined;
+    if (!isAdminRequest(token)) {
+      return res.status(403).json({ error: "Admin token required" });
+    }
+
+    try {
+      const levelshots = await listLevelshotOverrides();
+      res.json({ levelshots });
+    } catch (error) {
+      logRouteError("Error fetching levelshot overrides", error);
+      res.status(500).json({ error: "Failed to fetch levelshot overrides" });
+    }
+  });
+
+  app.post("/api/admin/levelshots", async (req, res) => {
+    const token = req.header("x-admin-token") || req.query.adminToken as string | undefined;
+    if (!isAdminRequest(token)) {
+      return res.status(403).json({ error: "Admin token required" });
+    }
+
+    try {
+      const mapName = String(req.body?.mapName || "").trim();
+      const imageUrl = String(req.body?.imageUrl || "").trim();
+      const isValidUrl = /^https?:\/\//i.test(imageUrl) || imageUrl.startsWith("/");
+
+      if (!mapName) {
+        return res.status(400).json({ error: "Map name is required" });
+      }
+
+      if (!isValidUrl) {
+        return res.status(400).json({ error: "Image URL must start with /, http:// or https://" });
+      }
+
+      const levelshot = await upsertLevelshotOverride(mapName, imageUrl);
+      res.json({ levelshot });
+    } catch (error) {
+      logRouteError("Error upserting levelshot override", error);
+      res.status(400).json({ error: "Failed to save levelshot override" });
+    }
+  });
+
+  app.post("/api/admin/levelshots/upload", (req, res) => {
+    const token = req.header("x-admin-token") || req.query.adminToken as string | undefined;
+    if (!isAdminRequest(token)) {
+      return res.status(403).json({ error: "Admin token required" });
+    }
+
+    levelshotsUpload.single("image")(req, res, (uploadError) => {
+      if (uploadError) {
+        const message = uploadError instanceof Error ? uploadError.message : "Upload error";
+        return res.status(400).json({ error: message });
+      }
+
+      const file = (req as unknown as { file?: { filename: string } }).file;
+      if (!file) {
+        return res.status(400).json({ error: "No image file provided" });
+      }
+
+      return res.json({
+        imageUrl: `/api/levelshots-files/${encodeURIComponent(file.filename)}`,
+      });
+    });
+  });
+
+  app.delete("/api/admin/levelshots/:mapName", async (req, res) => {
+    const token = req.header("x-admin-token") || req.query.adminToken as string | undefined;
+    if (!isAdminRequest(token)) {
+      return res.status(403).json({ error: "Admin token required" });
+    }
+
+    try {
+      const deleted = await deleteLevelshotOverride(req.params.mapName || "");
+      if (!deleted) {
+        return res.status(404).json({ error: "Levelshot override not found" });
+      }
+
+      res.status(204).send();
+    } catch (error) {
+      logRouteError("Error deleting levelshot override", error);
+      res.status(500).json({ error: "Failed to delete levelshot override" });
     }
   });
 
@@ -583,6 +713,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/levelshots/:mapName", async (req, res) => {
     try {
       const { mapName } = req.params;
+      const override = await getLevelshotOverride(mapName);
+      if (override) {
+        return res.redirect(302, override.imageUrl);
+      }
+
       const levelshot = await getMapLevelshot(mapName);
 
       if (!levelshot) {
@@ -595,6 +730,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error serving levelshot:", error);
       res.status(500).json({ error: "Failed to serve levelshot" });
+    }
+  });
+
+  app.get("/api/levelshots-files/:filename", async (req, res) => {
+    try {
+      const { filename } = req.params;
+      if (!filename || filename.includes("/") || filename.includes("\\")) {
+        return res.status(400).json({ error: "Invalid filename" });
+      }
+
+      const filePath = path.join(LEVELSHOTS_UPLOAD_DIR, filename);
+      if (!fs.existsSync(filePath)) {
+        return res.status(404).json({ error: "File not found" });
+      }
+
+      const ext = path.extname(filename).toLowerCase();
+      const mimeType =
+        ext === ".png"
+          ? "image/png"
+          : ext === ".jpg" || ext === ".jpeg"
+            ? "image/jpeg"
+            : ext === ".tga"
+              ? "image/tga"
+              : "application/octet-stream";
+
+      res.setHeader("Content-Type", mimeType);
+      res.setHeader("Cache-Control", "public, max-age=31536000");
+
+      const fileStream = fs.createReadStream(filePath);
+      fileStream.pipe(res);
+    } catch (error) {
+      logRouteError("Error serving levelshot file", error);
+      res.status(500).json({ error: "Failed to serve levelshot file" });
     }
   });
 
