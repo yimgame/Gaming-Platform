@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -25,6 +25,11 @@ type LevelshotOverride = {
   mapName: string;
   imageUrl: string;
   updatedAt: string;
+};
+
+type MatchSummary = {
+  map: string;
+  datetime: string;
 };
 
 const createEmptyGame = (id: string, title: string): GameConfig => ({
@@ -83,6 +88,7 @@ export default function AdminPage() {
   const [newLevelshotFile, setNewLevelshotFile] = useState<File | null>(null);
   const [newLevelshotPreviewUrl, setNewLevelshotPreviewUrl] = useState("");
   const [newLevelshotPreviewFailed, setNewLevelshotPreviewFailed] = useState(false);
+  const [didAutoFillCurrentMap, setDidAutoFillCurrentMap] = useState(false);
   const levelshotFileInputRef = useRef<HTMLInputElement | null>(null);
   const [drafts, setDrafts] = useState<Record<string, GameConfig>>({});
   const [siteDraft, setSiteDraft] = useState<SiteSettingsData>(DEFAULT_SITE_SETTINGS);
@@ -246,6 +252,59 @@ export default function AdminPage() {
     enabled: isEnabled,
   });
 
+  const recentMatchesQuery = useQuery<{ matches: MatchSummary[] }>({
+    queryKey: ["admin-recent-matches-for-levelshots"],
+    queryFn: async () => {
+      const response = await fetch("/api/stats/matches");
+      if (!response.ok) {
+        throw new Error("No se pudieron leer partidas recientes");
+      }
+
+      const payload = await parseJsonResponse(response, "No se pudieron parsear partidas recientes");
+      const matches = Array.isArray(payload.matches)
+        ? (payload.matches as MatchSummary[])
+        : [];
+
+      return { matches };
+    },
+    enabled: isEnabled && activeSection === "levelshots",
+  });
+
+  const levelshotOverrideMapSet = useMemo(() => {
+    const set = new Set<string>();
+    for (const item of adminLevelshotsQuery.data?.levelshots || []) {
+      set.add(item.mapName.toLowerCase());
+    }
+    return set;
+  }, [adminLevelshotsQuery.data?.levelshots]);
+
+  const getLvlworldUrlForMap = (mapName: string) => {
+    const map = mapName.trim().toLowerCase();
+    return map ? `https://lvlworld.com/levels/${map}/${map}lg.jpg` : "";
+  };
+
+  const currentMapName = String(serverStatusQuery.data?.mapname || "").trim().toLowerCase();
+  const currentMapNeedsSuggestion = Boolean(
+    currentMapName && !levelshotOverrideMapSet.has(currentMapName),
+  );
+
+  const suggestedLevelshots = useMemo(() => {
+    const suggestions: Array<{ mapName: string; imageUrl: string }> = [];
+    const seen = new Set<string>();
+
+    for (const match of recentMatchesQuery.data?.matches || []) {
+      const mapName = String(match.map || "").trim().toLowerCase();
+      if (!mapName || seen.has(mapName)) continue;
+      seen.add(mapName);
+
+      if (levelshotOverrideMapSet.has(mapName)) continue;
+      suggestions.push({ mapName, imageUrl: getLvlworldUrlForMap(mapName) });
+      if (suggestions.length >= 12) break;
+    }
+
+    return suggestions;
+  }, [recentMatchesQuery.data?.matches, levelshotOverrideMapSet]);
+
   useEffect(() => {
     const games = adminGamesQuery.data?.games;
     if (!games || games.length === 0) {
@@ -286,6 +345,32 @@ export default function AdminPage() {
   useEffect(() => {
     setNewLevelshotPreviewFailed(false);
   }, [newLevelshotPreviewUrl, manualLevelshotPreviewUrl]);
+
+  useEffect(() => {
+    if (activeSection !== "levelshots") {
+      setDidAutoFillCurrentMap(false);
+      return;
+    }
+
+    if (didAutoFillCurrentMap) return;
+    if (!currentMapNeedsSuggestion) return;
+    if (newLevelshotMap.trim() || newLevelshotUrl.trim() || newLevelshotFile) return;
+
+    const suggestionUrl = getLvlworldUrlForMap(currentMapName);
+    if (!suggestionUrl) return;
+
+    setNewLevelshotMap(currentMapName);
+    setNewLevelshotUrl(suggestionUrl);
+    setDidAutoFillCurrentMap(true);
+  }, [
+    activeSection,
+    didAutoFillCurrentMap,
+    currentMapNeedsSuggestion,
+    newLevelshotMap,
+    newLevelshotUrl,
+    newLevelshotFile,
+    currentMapName,
+  ]);
 
   const saveGameMutation = useMutation({
     mutationFn: async (game: GameConfig) => {
@@ -465,6 +550,28 @@ export default function AdminPage() {
     },
   });
 
+  const saveSuggestedLevelshotMutation = useMutation({
+    mutationFn: async ({ mapName, imageUrl }: { mapName: string; imageUrl: string }) => {
+      const response = await fetch("/api/admin/levelshots", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-admin-token": activeToken,
+        },
+        body: JSON.stringify({ mapName, imageUrl }),
+      });
+
+      if (!response.ok) {
+        throw new Error("No se pudo guardar la sugerencia");
+      }
+
+      return parseJsonResponse(response, "No se pudo parsear la sugerencia guardada");
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["admin-levelshots", activeToken] });
+    },
+  });
+
   const deleteLevelshotMutation = useMutation({
     mutationFn: async (mapName: string) => {
       const response = await fetch(`/api/admin/levelshots/${encodeURIComponent(mapName)}`, {
@@ -522,6 +629,45 @@ export default function AdminPage() {
       ...current,
       ...patch,
     }));
+  };
+
+  const applyLvlworldTemplate = () => {
+    const map = newLevelshotMap.trim().toLowerCase();
+    if (!map) {
+      window.alert("Primero ingresá el nombre del mapa");
+      return;
+    }
+
+    setNewLevelshotFile(null);
+    if (levelshotFileInputRef.current) {
+      levelshotFileInputRef.current.value = "";
+    }
+
+    setNewLevelshotUrl(getLvlworldUrlForMap(map));
+  };
+
+  const fillCurrentMap = () => {
+    const map = currentMapName;
+    if (!map) {
+      window.alert("No hay mapa actual disponible en el servidor");
+      return;
+    }
+
+    setNewLevelshotMap(map);
+    setNewLevelshotUrl(getLvlworldUrlForMap(map));
+    setDidAutoFillCurrentMap(true);
+  };
+
+  const clearLevelshotForm = () => {
+    setNewLevelshotMap("");
+    setNewLevelshotUrl("");
+    setNewLevelshotFile(null);
+    setNewLevelshotPreviewUrl("");
+    setNewLevelshotPreviewFailed(false);
+    setDidAutoFillCurrentMap(false);
+    if (levelshotFileInputRef.current) {
+      levelshotFileInputRef.current.value = "";
+    }
   };
 
   const handleActivate = async () => {
@@ -1078,6 +1224,12 @@ export default function AdminPage() {
                         }
                       }
                     }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        saveLevelshotMutation.mutate();
+                      }
+                    }}
                     placeholder="URL imagen (/images/q3ctf4.jpg o https://...)"
                   />
                   <Button
@@ -1086,6 +1238,33 @@ export default function AdminPage() {
                   >
                     Guardar levelshot
                   </Button>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={fillCurrentMap}
+                  >
+                    Mapa actual
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={applyLvlworldTemplate}
+                  >
+                    Usar URL Lvlworld
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={clearLevelshotForm}
+                  >
+                    Limpiar
+                  </Button>
+                  <p className="text-xs text-muted-foreground">
+                    Genera: https://lvlworld.com/levels/&lt;mapa&gt;/&lt;mapa&gt;lg.jpg
+                  </p>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
@@ -1130,6 +1309,84 @@ export default function AdminPage() {
                     No se pudo cargar la preview con la imagen actual.
                   </p>
                 )}
+
+                {currentMapNeedsSuggestion && (
+                  <Card className="p-3 space-y-2">
+                    <p className="text-sm font-semibold">Sugerencia automática (partida actual)</p>
+                    <p className="text-xs text-muted-foreground">
+                      Mapa actual: {currentMapName} - sin override guardado aún.
+                    </p>
+                    <img
+                      src={getLvlworldUrlForMap(currentMapName)}
+                      alt={`Sugerencia ${currentMapName}`}
+                      className="h-36 w-64 rounded border border-border object-cover"
+                    />
+                    <div>
+                      <Button
+                        size="sm"
+                        onClick={() =>
+                          saveSuggestedLevelshotMutation.mutate({
+                            mapName: currentMapName,
+                            imageUrl: getLvlworldUrlForMap(currentMapName),
+                          })
+                        }
+                        disabled={saveSuggestedLevelshotMutation.isPending}
+                      >
+                        Guardar sugerencia actual
+                      </Button>
+                    </div>
+                  </Card>
+                )}
+
+                <Card className="p-3 space-y-3">
+                  <p className="text-sm font-semibold">Sugerencias de mapas sin override</p>
+                  {recentMatchesQuery.isLoading ? (
+                    <p className="text-xs text-muted-foreground">Buscando mapas recientes...</p>
+                  ) : recentMatchesQuery.error ? (
+                    <p className="text-xs text-destructive">No se pudieron cargar sugerencias de mapas</p>
+                  ) : suggestedLevelshots.length ? (
+                    <div className="space-y-2">
+                      {suggestedLevelshots.map((item) => (
+                        <div key={item.mapName} className="rounded border border-border p-2 flex flex-wrap items-center gap-3">
+                          <img
+                            src={item.imageUrl}
+                            alt={`Sugerencia ${item.mapName}`}
+                            className="h-16 w-28 rounded border border-border object-cover"
+                          />
+                          <div className="min-w-40">
+                            <p className="text-sm font-medium">{item.mapName}</p>
+                            <p className="text-xs text-muted-foreground break-all">{item.imageUrl}</p>
+                          </div>
+                          <div className="ml-auto flex gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                setNewLevelshotMap(item.mapName);
+                                setNewLevelshotUrl(item.imageUrl);
+                                setNewLevelshotFile(null);
+                                if (levelshotFileInputRef.current) {
+                                  levelshotFileInputRef.current.value = "";
+                                }
+                              }}
+                            >
+                              Cargar
+                            </Button>
+                            <Button
+                              size="sm"
+                              onClick={() => saveSuggestedLevelshotMutation.mutate(item)}
+                              disabled={saveSuggestedLevelshotMutation.isPending}
+                            >
+                              Guardar
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">No hay sugerencias pendientes.</p>
+                  )}
+                </Card>
 
                 {adminLevelshotsQuery.isLoading ? (
                   <p className="text-sm text-muted-foreground">Cargando tabla de levelshots...</p>
