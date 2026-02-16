@@ -70,6 +70,17 @@ import {
   listLevelshotOverrides,
   upsertLevelshotOverride,
 } from "./levelshots-overrides-service";
+import {
+  createBackupNow,
+  getBackupStatus,
+  getBackupZipForDownload,
+  listBackups,
+  registerUploadedManualBackup,
+  restoreBackupFromScope,
+  setBackupsEnabled,
+  startBackupsScheduler,
+  updateBackupSettings,
+} from "./backups-service";
 import { RankingFiltersSchema } from "../shared/stats-schema";
 import fs from "fs";
 import multer from "multer";
@@ -78,6 +89,7 @@ const LEVELSHOTS_UPLOAD_DIR = path.resolve(process.cwd(), "data", "levelshots-im
 const MATCH_ASSETS_UPLOAD_DIR = path.resolve(process.cwd(), "data", "match-assets");
 const MATCH_DEMOS_UPLOAD_DIR = path.join(MATCH_ASSETS_UPLOAD_DIR, "demos");
 const MATCH_SCREENSHOTS_UPLOAD_DIR = path.join(MATCH_ASSETS_UPLOAD_DIR, "screenshots");
+const BACKUPS_UPLOAD_TEMP_DIR = path.resolve(process.cwd(), "data", "backups-upload-temp");
 
 const ensureLevelshotsUploadDir = async () => {
   await fs.promises.mkdir(LEVELSHOTS_UPLOAD_DIR, { recursive: true });
@@ -86,6 +98,10 @@ const ensureLevelshotsUploadDir = async () => {
 const ensureMatchAssetsUploadDirs = async () => {
   await fs.promises.mkdir(MATCH_DEMOS_UPLOAD_DIR, { recursive: true });
   await fs.promises.mkdir(MATCH_SCREENSHOTS_UPLOAD_DIR, { recursive: true });
+};
+
+const ensureBackupsUploadTempDir = async () => {
+  await fs.promises.mkdir(BACKUPS_UPLOAD_TEMP_DIR, { recursive: true });
 };
 
 const sanitizeMapName = (value: string) => value.toLowerCase().replace(/[^a-z0-9_-]/g, "");
@@ -170,9 +186,34 @@ const matchAssetsUpload = multer({
   },
 });
 
+const backupUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => {
+      cb(null, BACKUPS_UPLOAD_TEMP_DIR);
+    },
+    filename: (_req, file, cb) => {
+      const safeBase = sanitizeFileNamePart(path.basename(file.originalname || "backup", path.extname(file.originalname || "")));
+      cb(null, `${Date.now()}-${safeBase}.zip`);
+    },
+  }),
+  fileFilter: (_req, file, cb) => {
+    const extension = path.extname(file.originalname || "").toLowerCase();
+    if (extension === ".zip") {
+      cb(null, true);
+      return;
+    }
+    cb(new Error("Solo se permite archivo .zip"));
+  },
+  limits: {
+    fileSize: 2 * 1024 * 1024 * 1024,
+  },
+});
+
 export async function registerRoutes(app: Express): Promise<Server> {
   await ensureLevelshotsUploadDir();
   await ensureMatchAssetsUploadDirs();
+  await ensureBackupsUploadTempDir();
+  await startBackupsScheduler();
 
   const getErrorMessage = (error: unknown) => {
     if (error instanceof Error) return error.message;
@@ -235,6 +276,182 @@ export async function registerRoutes(app: Express): Promise<Server> {
       statsPath: STATS_BASE_PATH,
       screenshotsPath: SCREENSHOTS_BASE_PATH,
       demosPath: DEMOS_BASE_PATH,
+    });
+  });
+
+  app.get("/api/admin/backups/status", async (req, res) => {
+    const token = req.header("x-admin-token") || req.query.adminToken as string | undefined;
+    if (!isAdminRequest(token)) {
+      return res.status(403).json({ error: "Admin token required" });
+    }
+
+    try {
+      const status = await getBackupStatus();
+      res.json({ status });
+    } catch (error) {
+      logRouteError("Error fetching backups status", error);
+      res.status(500).json({ error: "Failed to fetch backups status" });
+    }
+  });
+
+  app.get("/api/admin/backups", async (req, res) => {
+    const token = req.header("x-admin-token") || req.query.adminToken as string | undefined;
+    if (!isAdminRequest(token)) {
+      return res.status(403).json({ error: "Admin token required" });
+    }
+
+    try {
+      const backups = await listBackups();
+      res.json({ backups });
+    } catch (error) {
+      logRouteError("Error listing backups", error);
+      res.status(500).json({ error: "Failed to list backups" });
+    }
+  });
+
+  app.put("/api/admin/backups/settings", async (req, res) => {
+    const token = req.header("x-admin-token") || req.query.adminToken as string | undefined;
+    if (!isAdminRequest(token)) {
+      return res.status(403).json({ error: "Admin token required" });
+    }
+
+    try {
+      const status = await updateBackupSettings(req.body || {});
+      res.json({ status });
+    } catch (error) {
+      logRouteError("Error updating backup settings", error);
+      res.status(400).json({ error: "Failed to update backup settings" });
+    }
+  });
+
+  app.post("/api/admin/backups/start", async (req, res) => {
+    const token = req.header("x-admin-token") || req.query.adminToken as string | undefined;
+    if (!isAdminRequest(token)) {
+      return res.status(403).json({ error: "Admin token required" });
+    }
+
+    try {
+      const status = await setBackupsEnabled(true);
+      res.json({ status });
+    } catch (error) {
+      logRouteError("Error starting backups", error);
+      res.status(500).json({ error: "Failed to start backups" });
+    }
+  });
+
+  app.post("/api/admin/backups/stop", async (req, res) => {
+    const token = req.header("x-admin-token") || req.query.adminToken as string | undefined;
+    if (!isAdminRequest(token)) {
+      return res.status(403).json({ error: "Admin token required" });
+    }
+
+    try {
+      const status = await setBackupsEnabled(false);
+      res.json({ status });
+    } catch (error) {
+      logRouteError("Error stopping backups", error);
+      res.status(500).json({ error: "Failed to stop backups" });
+    }
+  });
+
+  app.post("/api/admin/backups/run", async (req, res) => {
+    const token = req.header("x-admin-token") || req.query.adminToken as string | undefined;
+    if (!isAdminRequest(token)) {
+      return res.status(403).json({ error: "Admin token required" });
+    }
+
+    try {
+      const result = await createBackupNow();
+      if (!result.ok) {
+        return res.status(400).json(result);
+      }
+
+      const status = await getBackupStatus();
+      res.json({ ...result, status });
+    } catch (error) {
+      logRouteError("Error creating backup", error);
+      res.status(500).json({ error: "Failed to create backup" });
+    }
+  });
+
+  app.post("/api/admin/backups/restore", async (req, res) => {
+    const token = req.header("x-admin-token") || req.query.adminToken as string | undefined;
+    if (!isAdminRequest(token)) {
+      return res.status(403).json({ error: "Admin token required" });
+    }
+
+    try {
+      const filename = String(req.body?.filename || "").trim();
+      const scope = req.body?.scope === "manual" ? "manual" : "default";
+      const confirmRestore = Boolean(req.body?.confirmRestore);
+      const result = await restoreBackupFromScope(scope, filename, confirmRestore);
+
+      if (!result.ok) {
+        return res.status(400).json(result);
+      }
+
+      res.json(result);
+    } catch (error) {
+      logRouteError("Error restoring backup", error);
+      res.status(500).json({ error: "Failed to restore backup" });
+    }
+  });
+
+  app.get("/api/admin/backups/download/:scope/:filename", async (req, res) => {
+    const token = req.header("x-admin-token") || req.query.adminToken as string | undefined;
+    if (!isAdminRequest(token)) {
+      return res.status(403).json({ error: "Admin token required" });
+    }
+
+    try {
+      const scope = req.params.scope === "manual" ? "manual" : "default";
+      const filename = String(req.params.filename || "").trim();
+      const fullPath = await getBackupZipForDownload(scope, filename);
+
+      if (!fullPath) {
+        return res.status(404).json({ error: "Backup not found" });
+      }
+
+      res.setHeader("Content-Type", "application/zip");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+
+      const stream = fs.createReadStream(fullPath);
+      stream.pipe(res);
+    } catch (error) {
+      logRouteError("Error downloading backup", error);
+      res.status(500).json({ error: "Failed to download backup" });
+    }
+  });
+
+  app.post("/api/admin/backups/upload", (req, res) => {
+    const token = req.header("x-admin-token") || req.query.adminToken as string | undefined;
+    if (!isAdminRequest(token)) {
+      return res.status(403).json({ error: "Admin token required" });
+    }
+
+    backupUpload.single("file")(req, res, async (uploadError) => {
+      if (uploadError) {
+        const message = uploadError instanceof Error ? uploadError.message : "Upload error";
+        return res.status(400).json({ error: message });
+      }
+
+      const file = (req as unknown as { file?: { path: string; originalname: string } }).file;
+      if (!file) {
+        return res.status(400).json({ error: "No backup file provided" });
+      }
+
+      try {
+        const result = await registerUploadedManualBackup(file.path, file.originalname);
+        if (!result.ok) {
+          return res.status(400).json(result);
+        }
+
+        const backups = await listBackups();
+        return res.status(201).json({ result, backups });
+      } catch (error) {
+        logRouteError("Error uploading manual backup", error);
+        return res.status(500).json({ error: "Failed to upload backup" });
+      }
     });
   });
 

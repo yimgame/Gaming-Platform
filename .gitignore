@@ -26,3 +26,6 @@ pnpm-debug.log*
 gpg-public-key.asc
 data/levelshots-images/
 data/match-assets/
+data/backups/
+data/backups-manual/
+data/backups-upload-temp/

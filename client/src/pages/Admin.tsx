@@ -32,6 +32,27 @@ type MatchSummary = {
   datetime: string;
 };
 
+type BackupStatus = {
+  enabled: boolean;
+  maxCopies: number;
+  intervalDays: number;
+  lastBackupAt: string | null;
+  running: boolean;
+  copiesAvailable: number;
+  latestBackup: { filename: string; sizeBytes: number; createdAt: string } | null;
+  nextBackupAt: string | null;
+};
+
+type BackupItem = {
+  scope: "default" | "manual";
+  protectedFromRotation: boolean;
+  filename: string;
+  sizeBytes: number;
+  createdAt: string;
+};
+
+const backupKeyOf = (item: { scope: "default" | "manual"; filename: string }) => `${item.scope}::${item.filename}`;
+
 const createEmptyGame = (id: string, title: string): GameConfig => ({
   id,
   title,
@@ -94,6 +115,12 @@ export default function AdminPage() {
   const levelshotFileInputRef = useRef<HTMLInputElement | null>(null);
   const [drafts, setDrafts] = useState<Record<string, GameConfig>>({});
   const [siteDraft, setSiteDraft] = useState<SiteSettingsData>(DEFAULT_SITE_SETTINGS);
+  const [backupCopiesDraft, setBackupCopiesDraft] = useState("3");
+  const [backupIntervalDaysDraft, setBackupIntervalDaysDraft] = useState("1");
+  const [restoreTarget, setRestoreTarget] = useState("");
+  const [selectedBackups, setSelectedBackups] = useState<string[]>([]);
+  const [uploadBackupFile, setUploadBackupFile] = useState<File | null>(null);
+  const uploadBackupInputRef = useRef<HTMLInputElement | null>(null);
   const manualLevelshotPreviewUrl = newLevelshotFile
     ? ""
     : newLevelshotUrl.trim();
@@ -198,6 +225,42 @@ export default function AdminPage() {
 
       if (!response.ok) {
         throw new Error("No se pudieron leer los mensajes");
+      }
+
+      return response.json();
+    },
+    enabled: isEnabled,
+  });
+
+  const adminBackupsStatusQuery = useQuery<{ status: BackupStatus }>({
+    queryKey: ["admin-backups-status", activeToken],
+    queryFn: async () => {
+      const response = await fetch("/api/admin/backups/status", {
+        headers: {
+          "x-admin-token": activeToken,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error("No se pudo leer el estado de backups");
+      }
+
+      return response.json();
+    },
+    enabled: isEnabled,
+  });
+
+  const adminBackupsListQuery = useQuery<{ backups: BackupItem[] }>({
+    queryKey: ["admin-backups-list", activeToken],
+    queryFn: async () => {
+      const response = await fetch("/api/admin/backups", {
+        headers: {
+          "x-admin-token": activeToken,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error("No se pudo leer lista de backups");
       }
 
       return response.json();
@@ -348,6 +411,19 @@ export default function AdminPage() {
       setSiteDraft(adminSiteSettingsQuery.data.settings);
     }
   }, [adminSiteSettingsQuery.data]);
+
+  useEffect(() => {
+    const status = adminBackupsStatusQuery.data?.status;
+    if (!status) return;
+    setBackupCopiesDraft(String(status.maxCopies));
+    setBackupIntervalDaysDraft(String(status.intervalDays));
+  }, [adminBackupsStatusQuery.data?.status]);
+
+  useEffect(() => {
+    const backups = adminBackupsListQuery.data?.backups || [];
+    const validKeys = new Set(backups.map((item) => backupKeyOf(item)));
+    setSelectedBackups((current) => current.filter((key) => validKeys.has(key)));
+  }, [adminBackupsListQuery.data?.backups]);
 
   useEffect(() => {
     if (!newLevelshotFile) {
@@ -611,6 +687,132 @@ export default function AdminPage() {
     },
   });
 
+  const saveBackupSettingsMutation = useMutation({
+    mutationFn: async () => {
+      const response = await fetch("/api/admin/backups/settings", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          "x-admin-token": activeToken,
+        },
+        body: JSON.stringify({
+          maxCopies: Number(backupCopiesDraft),
+          intervalDays: Number(backupIntervalDaysDraft),
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("No se pudieron guardar los ajustes de backup");
+      }
+
+      return response.json();
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["admin-backups-status", activeToken] });
+      await queryClient.invalidateQueries({ queryKey: ["admin-backups-list", activeToken] });
+    },
+  });
+
+  const toggleBackupsMutation = useMutation({
+    mutationFn: async (enabled: boolean) => {
+      const response = await fetch(enabled ? "/api/admin/backups/start" : "/api/admin/backups/stop", {
+        method: "POST",
+        headers: {
+          "x-admin-token": activeToken,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error("No se pudo cambiar el estado de backups");
+      }
+
+      return response.json();
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["admin-backups-status", activeToken] });
+    },
+  });
+
+  const runBackupMutation = useMutation({
+    mutationFn: async () => {
+      const response = await fetch("/api/admin/backups/run", {
+        method: "POST",
+        headers: {
+          "x-admin-token": activeToken,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error("No se pudo ejecutar backup");
+      }
+
+      return response.json();
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["admin-backups-status", activeToken] });
+      await queryClient.invalidateQueries({ queryKey: ["admin-backups-list", activeToken] });
+    },
+  });
+
+  const restoreBackupMutation = useMutation({
+    mutationFn: async ({ filename, scope }: { filename: string; scope: "default" | "manual" }) => {
+      const response = await fetch("/api/admin/backups/restore", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-admin-token": activeToken,
+        },
+        body: JSON.stringify({
+          filename,
+          scope,
+          confirmRestore: true,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("No se pudo restaurar backup");
+      }
+
+      return response.json();
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["admin-backups-status", activeToken] });
+      await queryClient.invalidateQueries({ queryKey: ["admin-backups-list", activeToken] });
+    },
+  });
+
+  const uploadBackupMutation = useMutation({
+    mutationFn: async () => {
+      if (!uploadBackupFile) {
+        throw new Error("Seleccioná un archivo .zip");
+      }
+
+      const formData = new FormData();
+      formData.append("file", uploadBackupFile);
+
+      const response = await fetch("/api/admin/backups/upload", {
+        method: "POST",
+        headers: {
+          "x-admin-token": activeToken,
+        },
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error("No se pudo subir el backup manual");
+      }
+
+      return response.json();
+    },
+    onSuccess: async () => {
+      setUploadBackupFile(null);
+      if (uploadBackupInputRef.current) {
+        uploadBackupInputRef.current.value = "";
+      }
+      await queryClient.invalidateQueries({ queryKey: ["admin-backups-list", activeToken] });
+    },
+  });
+
   const updateDraft = (id: string, patch: Partial<GameConfig>) => {
     setDrafts((current) => {
       const prev = current[id];
@@ -795,6 +997,7 @@ export default function AdminPage() {
               <TabsTrigger value="config">4) Config juegos</TabsTrigger>
               <TabsTrigger value="agregar">5) Agregar juego</TabsTrigger>
               <TabsTrigger value="levelshots">6) Levelshots</TabsTrigger>
+              <TabsTrigger value="backups">7) Backups</TabsTrigger>
             </TabsList>
 
             <TabsContent value="estado" className="space-y-4">
@@ -1583,6 +1786,251 @@ export default function AdminPage() {
                   </div>
                 ) : (
                   <p className="text-sm text-muted-foreground">No hay overrides cargados.</p>
+                )}
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="backups" className="space-y-4">
+              <Card className="p-4 space-y-4">
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold">Backups automáticos</p>
+                  <p className="text-xs text-muted-foreground">
+                    Recomendado: incluir DB + carpeta data del servidor (capturas, demos, levelshots y configs).
+                  </p>
+                </div>
+
+                {adminBackupsStatusQuery.isLoading ? (
+                  <p className="text-sm text-muted-foreground">Cargando estado de backups...</p>
+                ) : adminBackupsStatusQuery.error ? (
+                  <p className="text-sm text-destructive">No se pudo cargar el estado de backups</p>
+                ) : adminBackupsStatusQuery.data?.status ? (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div>
+                        <p className="text-xs text-muted-foreground mb-1">Cantidad de copias (default 2-3)</p>
+                        <Input
+                          value={backupCopiesDraft}
+                          onChange={(e) => setBackupCopiesDraft(e.target.value)}
+                          className="h-8 text-xs"
+                          placeholder="3"
+                        />
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground mb-1">Cada cuántos días</p>
+                        <Input
+                          value={backupIntervalDaysDraft}
+                          onChange={(e) => setBackupIntervalDaysDraft(e.target.value)}
+                          className="h-8 text-xs"
+                          placeholder="1"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs text-muted-foreground">
+                      <p>Activo: {adminBackupsStatusQuery.data.status.enabled ? "Sí" : "No"}</p>
+                      <p>Ejecutando: {adminBackupsStatusQuery.data.status.running ? "Sí" : "No"}</p>
+                      <p>Último backup: {adminBackupsStatusQuery.data.status.lastBackupAt ? new Date(adminBackupsStatusQuery.data.status.lastBackupAt).toLocaleString() : "Nunca"}</p>
+                      <p>Próximo backup: {adminBackupsStatusQuery.data.status.nextBackupAt ? new Date(adminBackupsStatusQuery.data.status.nextBackupAt).toLocaleString() : "-"}</p>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        onClick={() => saveBackupSettingsMutation.mutate()}
+                        disabled={saveBackupSettingsMutation.isPending}
+                      >
+                        Guardar ajustes
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() => toggleBackupsMutation.mutate(true)}
+                        disabled={toggleBackupsMutation.isPending}
+                      >
+                        Activar backups
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() => toggleBackupsMutation.mutate(false)}
+                        disabled={toggleBackupsMutation.isPending}
+                      >
+                        Detener backups
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        onClick={() => runBackupMutation.mutate()}
+                        disabled={runBackupMutation.isPending}
+                      >
+                        Ejecutar backup ahora
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
+              </Card>
+
+              <Card className="p-4 space-y-3">
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold">Restaurar backup</p>
+                  <p className="text-xs text-muted-foreground">
+                    La restauración aplica data y DB. Se recomienda hacerla con baja actividad.
+                  </p>
+                </div>
+
+                <div className="rounded border border-border p-3 space-y-2">
+                  <p className="text-xs font-medium">Subir backup propio (espacio protegido sin rotación)</p>
+                  <p className="text-xs text-muted-foreground">
+                    Validador estricto: el ZIP debe tener estructura y contenido idénticos al formato de backup del sistema.
+                  </p>
+                  <div className="flex flex-wrap gap-2 items-center">
+                    <input
+                      ref={uploadBackupInputRef}
+                      type="file"
+                      accept=".zip"
+                      className="hidden"
+                      onChange={(event) => setUploadBackupFile(event.target.files?.[0] || null)}
+                    />
+                    <Button
+                      variant="outline"
+                      onClick={() => uploadBackupInputRef.current?.click()}
+                    >
+                      Elegir archivo .zip
+                    </Button>
+                    <p className="text-xs text-muted-foreground">
+                      {uploadBackupFile ? uploadBackupFile.name : "Sin archivo seleccionado"}
+                    </p>
+                    <Button
+                      variant="secondary"
+                      onClick={() => uploadBackupMutation.mutate()}
+                      disabled={!uploadBackupFile || uploadBackupMutation.isPending}
+                    >
+                      Subir a espacio protegido
+                    </Button>
+                  </div>
+                </div>
+
+                {adminBackupsListQuery.isLoading ? (
+                  <p className="text-sm text-muted-foreground">Cargando backups...</p>
+                ) : adminBackupsListQuery.error ? (
+                  <p className="text-sm text-destructive">No se pudo cargar la lista de backups</p>
+                ) : adminBackupsListQuery.data?.backups?.length ? (
+                  <div className="space-y-2">
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Backup seleccionado</p>
+                      <select
+                        value={restoreTarget}
+                        onChange={(event) => setRestoreTarget(event.target.value)}
+                        className="w-full h-8 rounded-md border border-input bg-background px-2 text-xs"
+                      >
+                        <option value="">Seleccionar backup...</option>
+                        {adminBackupsListQuery.data.backups.map((item) => (
+                          <option key={`${item.scope}:${item.filename}`} value={`${item.scope}::${item.filename}`}>
+                            [{item.scope === "manual" ? "PROTEGIDO" : "AUTO"}] {item.filename} ({new Date(item.createdAt).toLocaleString()})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="max-h-40 overflow-y-auto space-y-1">
+                      {adminBackupsListQuery.data.backups.length > 0 && (
+                        <div className="rounded border border-border p-2 text-xs flex items-center justify-between gap-2">
+                          <label className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={selectedBackups.length === adminBackupsListQuery.data.backups.length}
+                              onChange={(event) => {
+                                if (event.target.checked) {
+                                  setSelectedBackups(adminBackupsListQuery.data!.backups.map((item) => backupKeyOf(item)));
+                                  return;
+                                }
+                                setSelectedBackups([]);
+                              }}
+                            />
+                            <span>Seleccionar todos</span>
+                          </label>
+                          <span className="text-muted-foreground">{selectedBackups.length} seleccionados</span>
+                        </div>
+                      )}
+
+                      {adminBackupsListQuery.data.backups.map((item) => (
+                        <div key={`${item.scope}:${item.filename}`} className="rounded border border-border p-2 text-xs flex justify-between gap-3 items-center">
+                          <div className="min-w-0 flex items-start gap-2">
+                            <input
+                              type="checkbox"
+                              checked={selectedBackups.includes(backupKeyOf(item))}
+                              onChange={(event) => {
+                                const key = backupKeyOf(item);
+                                setSelectedBackups((current) => {
+                                  if (event.target.checked) {
+                                    if (current.includes(key)) return current;
+                                    return [...current, key];
+                                  }
+                                  return current.filter((entry) => entry !== key);
+                                });
+                              }}
+                              className="mt-0.5"
+                            />
+                            <div>
+                              <p className="truncate">{item.filename}</p>
+                              <p className="text-muted-foreground">
+                                {item.scope === "manual" ? "Protegido" : "Automático"}
+                                {item.protectedFromRotation ? " · sin rotación" : " · con rotación"}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-muted-foreground">{(item.sizeBytes / (1024 * 1024)).toFixed(1)} MB</span>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                const url = `/api/admin/backups/download/${encodeURIComponent(item.scope)}/${encodeURIComponent(item.filename)}?adminToken=${encodeURIComponent(activeToken)}`;
+                                window.open(url, "_blank");
+                              }}
+                            >
+                              Descargar
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        disabled={selectedBackups.length === 0}
+                        onClick={() => {
+                          const backups = adminBackupsListQuery.data?.backups || [];
+                          const selected = backups.filter((item) => selectedBackups.includes(backupKeyOf(item)));
+                          for (const item of selected) {
+                            const url = `/api/admin/backups/download/${encodeURIComponent(item.scope)}/${encodeURIComponent(item.filename)}?adminToken=${encodeURIComponent(activeToken)}`;
+                            window.open(url, "_blank");
+                          }
+                        }}
+                      >
+                        Descargar seleccionados
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        disabled={!restoreTarget || restoreBackupMutation.isPending}
+                        onClick={() => {
+                          if (!restoreTarget) return;
+                          const [scope, filename] = restoreTarget.split("::");
+                          if (!scope || !filename) {
+                            window.alert("Seleccioná un backup válido");
+                            return;
+                          }
+                          const confirmed = window.confirm(`¿Restaurar backup ${filename}? Esta acción puede sobrescribir data y DB.`);
+                          if (!confirmed) return;
+                          restoreBackupMutation.mutate({
+                            filename,
+                            scope: scope === "manual" ? "manual" : "default",
+                          });
+                        }}
+                      >
+                        Restaurar backup seleccionado
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">No hay backups disponibles.</p>
                 )}
               </Card>
             </TabsContent>
