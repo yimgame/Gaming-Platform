@@ -30,6 +30,12 @@ import {
   getManualMatchAssets
 } from "./match-assets-service";
 import {
+  createContactMessage,
+  getContactMessages,
+  getSiteSettingsData,
+  updateSiteSettingsData,
+} from "./site-settings-service";
+import {
   createGameConfig,
   deleteGameConfig,
   getGamesConfig,
@@ -48,10 +54,24 @@ import {
   STATS_BASE_PATH,
 } from "./config";
 import { getServerStatus, refreshServerStatus } from "./q3a-status";
+import { getMapLevelshot } from "./levelshots-service";
 import { RankingFiltersSchema } from "../shared/stats-schema";
 import fs from "fs";
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  const getErrorMessage = (error: unknown) => {
+    if (error instanceof Error) return error.message;
+    try {
+      return String(error);
+    } catch {
+      return "Unknown error";
+    }
+  };
+
+  const logRouteError = (context: string, error: unknown) => {
+    console.error(`${context}: ${getErrorMessage(error)}`);
+  };
+
   const isAdminRequest = (token: string | undefined) => {
     if (!ADMIN_TOKEN) return false;
     return token === ADMIN_TOKEN;
@@ -80,6 +100,82 @@ export async function registerRoutes(app: Express): Promise<Server> {
       screenshotsPath: SCREENSHOTS_BASE_PATH,
       demosPath: DEMOS_BASE_PATH,
     });
+  });
+
+  app.get("/api/site-settings", async (_req, res) => {
+    try {
+      const settings = await getSiteSettingsData();
+      res.json({ settings });
+    } catch (error) {
+      logRouteError("Error fetching site settings", error);
+      res.status(500).json({ error: "Failed to fetch site settings" });
+    }
+  });
+
+  app.post("/api/contact-messages", async (req, res) => {
+    try {
+      const message = await createContactMessage(req.body || {});
+      res.status(201).json({ message });
+    } catch (error) {
+      logRouteError("Error creating contact message", error);
+      if (error instanceof Error && error.message === "DB_MISSING_CONTACT_TABLE") {
+        return res.status(503).json({
+          error: "Contact messages storage not initialized. Run: npm run db:push",
+        });
+      }
+      res.status(400).json({ error: "Failed to send contact message" });
+    }
+  });
+
+  app.get("/api/admin/site-settings", async (req, res) => {
+    const token = req.header("x-admin-token") || req.query.adminToken as string | undefined;
+    if (!isAdminRequest(token)) {
+      return res.status(403).json({ error: "Admin token required" });
+    }
+
+    try {
+      const settings = await getSiteSettingsData();
+      res.json({ settings });
+    } catch (error) {
+      logRouteError("Error fetching admin site settings", error);
+      res.status(500).json({ error: "Failed to fetch admin site settings" });
+    }
+  });
+
+  app.put("/api/admin/site-settings", async (req, res) => {
+    const token = req.header("x-admin-token") || req.query.adminToken as string | undefined;
+    if (!isAdminRequest(token)) {
+      return res.status(403).json({ error: "Admin token required" });
+    }
+
+    try {
+      const settings = await updateSiteSettingsData(req.body || {});
+      res.json({ settings });
+    } catch (error) {
+      logRouteError("Error updating admin site settings", error);
+      if (error instanceof Error && error.message === "DB_MISSING_SITE_TABLE") {
+        return res.status(503).json({
+          error: "Site settings storage not initialized. Run: npm run db:push",
+        });
+      }
+      res.status(400).json({ error: "Failed to update admin site settings" });
+    }
+  });
+
+  app.get("/api/admin/contact-messages", async (req, res) => {
+    const token = req.header("x-admin-token") || req.query.adminToken as string | undefined;
+    if (!isAdminRequest(token)) {
+      return res.status(403).json({ error: "Admin token required" });
+    }
+
+    try {
+      const rawLimit = req.query.limit ? parseInt(req.query.limit as string, 10) : 200;
+      const messages = await getContactMessages(rawLimit);
+      res.json({ messages });
+    } catch (error) {
+      logRouteError("Error fetching admin contact messages", error);
+      res.status(500).json({ error: "Failed to fetch contact messages" });
+    }
   });
 
   app.get("/api/games", async (_req, res) => {
@@ -480,6 +576,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error serving screenshot:", error);
       res.status(500).json({ error: "Failed to serve screenshot" });
+    }
+  });
+
+  // Servir levelshot de mapa desde su pk3
+  app.get("/api/levelshots/:mapName", async (req, res) => {
+    try {
+      const { mapName } = req.params;
+      const levelshot = await getMapLevelshot(mapName);
+
+      if (!levelshot) {
+        return res.status(404).json({ error: "Levelshot not found" });
+      }
+
+      res.setHeader("Content-Type", levelshot.mimeType);
+      res.setHeader("Cache-Control", "public, max-age=3600");
+      res.send(levelshot.buffer);
+    } catch (error) {
+      console.error("Error serving levelshot:", error);
+      res.status(500).json({ error: "Failed to serve levelshot" });
     }
   });
 

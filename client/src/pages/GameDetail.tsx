@@ -51,6 +51,8 @@ export default function GameDetailPage() {
 
   const game = gamesData?.games?.find((item) => item.id === gameId);
   const supportsQuakeStats = Boolean(game?.supportsQuakeStats);
+  const [showLevelshot, setShowLevelshot] = useState(true);
+  const [mapImageLoaded, setMapImageLoaded] = useState(false);
 
   // Consultar estado del servidor para Quake 3
   const { data: serverStatus } = useQuery<QuakeServerStatus>({
@@ -74,6 +76,51 @@ export default function GameDetailPage() {
   const playerCount = supportsQuakeStats && serverStatus?.online
     ? `${serverStatus.clients || 0}/${serverStatus.maxClients || 16}`
     : game?.playerCount || "0/16";
+
+  const currentMapName = supportsQuakeStats && serverStatus?.online
+    ? serverStatus.mapname || ""
+    : "";
+  const levelshotUrl = currentMapName
+    ? `/api/levelshots/${encodeURIComponent(currentMapName)}`
+    : "";
+  const placeholderMapImage = game?.cardImage || game?.backgroundImage || "/quake3-hero.jpg";
+  const displayedMapImage = showLevelshot && levelshotUrl ? levelshotUrl : placeholderMapImage;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!levelshotUrl) {
+      setShowLevelshot(false);
+      setMapImageLoaded(true);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setMapImageLoaded(false);
+
+    const prefetchImage = new Image();
+    prefetchImage.onload = () => {
+      if (cancelled) return;
+      setShowLevelshot(true);
+      setMapImageLoaded(true);
+    };
+    prefetchImage.onerror = () => {
+      if (cancelled) return;
+      setShowLevelshot(false);
+      setMapImageLoaded(true);
+    };
+    prefetchImage.src = levelshotUrl;
+
+    return () => {
+      cancelled = true;
+    };
+  }, [levelshotUrl]);
+
+  useEffect(() => {
+    if (showLevelshot) return;
+    setMapImageLoaded(false);
+  }, [showLevelshot, placeholderMapImage]);
 
   if (!gamesData) {
     return (
@@ -198,33 +245,55 @@ export default function GameDetailPage() {
             {/* Server Status Card */}
             <Card className="p-6">
               <h2 className="text-2xl font-bold mb-4">Estado del servidor</h2>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="flex items-center space-x-4">
-                  <div className={`w-3 h-3 rounded-full ${status === 'online' ? 'bg-green-500' : 'bg-red-500'} animate-pulse`} />
-                  <div>
-                    <p className="text-sm text-muted-foreground">Estado</p>
-                    <p className="text-lg font-bold capitalize">{status}</p>
+              <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+                <div className="w-full lg:w-64 space-y-6">
+                  <div className="flex items-center space-x-4">
+                    <div className={`w-3 h-3 rounded-full ${status === 'online' ? 'bg-green-500' : 'bg-red-500'} animate-pulse`} />
+                    <div>
+                      <p className="text-sm text-muted-foreground">Estado</p>
+                      <p className="text-lg font-bold capitalize">{status}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center space-x-4">
+                    <Users className="w-8 h-8 text-primary" />
+                    <div>
+                      <p className="text-sm text-muted-foreground">Jugadores</p>
+                      <p className="text-lg font-bold">{playerCount}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center space-x-4">
+                    <Target className="w-8 h-8 text-primary" />
+                    <div>
+                      <p className="text-sm text-muted-foreground">
+                        {supportsQuakeStats && serverStatus?.online ? "Mapa actual" : "Latencia"}
+                      </p>
+                      <p className="text-lg font-bold">
+                        {supportsQuakeStats && serverStatus?.online
+                          ? serverStatus.mapname || "N/A"
+                          : "~15ms"}
+                      </p>
+                    </div>
                   </div>
                 </div>
-                <div className="flex items-center space-x-4">
-                  <Users className="w-8 h-8 text-primary" />
-                  <div>
-                    <p className="text-sm text-muted-foreground">Jugadores</p>
-                    <p className="text-lg font-bold">{playerCount}</p>
-                  </div>
-                </div>
-                <div className="flex items-center space-x-4">
-                  <Target className="w-8 h-8 text-primary" />
-                  <div>
-                    <p className="text-sm text-muted-foreground">
-                      {supportsQuakeStats && serverStatus?.online ? "Mapa actual" : "Latencia"}
-                    </p>
-                    <p className="text-lg font-bold">
-                      {supportsQuakeStats && serverStatus?.online 
-                        ? serverStatus.mapname || "N/A"
-                        : "~15ms"}
-                    </p>
-                  </div>
+
+                <div className="w-full flex-1 flex justify-start lg:justify-center">
+                  {(supportsQuakeStats && serverStatus?.online) && (
+                    <img
+                      src={displayedMapImage}
+                      alt={showLevelshot ? `Levelshot de ${serverStatus.mapname || "mapa"}` : "Imagen placeholder de mapa"}
+                      className={`h-[280px] w-full max-w-[520px] rounded-md border border-border object-cover transition-opacity duration-500 ${mapImageLoaded ? "opacity-100" : "opacity-0"}`}
+                      onLoad={() => setMapImageLoaded(true)}
+                      onError={() => {
+                        if (showLevelshot) {
+                          setShowLevelshot(false);
+                          return;
+                        }
+                        setMapImageLoaded(true);
+                      }}
+                    />
+                  )}
                 </div>
               </div>
               
