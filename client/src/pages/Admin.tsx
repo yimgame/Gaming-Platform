@@ -89,6 +89,8 @@ export default function AdminPage() {
   const [newLevelshotPreviewUrl, setNewLevelshotPreviewUrl] = useState("");
   const [newLevelshotPreviewFailed, setNewLevelshotPreviewFailed] = useState(false);
   const [didAutoFillCurrentMap, setDidAutoFillCurrentMap] = useState(false);
+  const [currentMapSuggestionSource, setCurrentMapSuggestionSource] = useState<"lvlworld" | "q3df">("lvlworld");
+  const [suggestionSourceByMap, setSuggestionSourceByMap] = useState<Record<string, "lvlworld" | "q3df">>({});
   const levelshotFileInputRef = useRef<HTMLInputElement | null>(null);
   const [drafts, setDrafts] = useState<Record<string, GameConfig>>({});
   const [siteDraft, setSiteDraft] = useState<SiteSettingsData>(DEFAULT_SITE_SETTINGS);
@@ -283,13 +285,18 @@ export default function AdminPage() {
     return map ? `https://lvlworld.com/levels/${map}/${map}lg.jpg` : "";
   };
 
+  const getQ3dfUrlForMap = (mapName: string) => {
+    const map = mapName.trim().toLowerCase();
+    return map ? `https://ws.q3df.org/images/levelshots/512x384/${map}.jpg` : "";
+  };
+
   const currentMapName = String(serverStatusQuery.data?.mapname || "").trim().toLowerCase();
   const currentMapNeedsSuggestion = Boolean(
     currentMapName && !levelshotOverrideMapSet.has(currentMapName),
   );
 
   const suggestedLevelshots = useMemo(() => {
-    const suggestions: Array<{ mapName: string; imageUrl: string }> = [];
+    const suggestions: Array<{ mapName: string; lvlworldUrl: string; q3dfUrl: string }> = [];
     const seen = new Set<string>();
 
     for (const match of recentMatchesQuery.data?.matches || []) {
@@ -298,12 +305,20 @@ export default function AdminPage() {
       seen.add(mapName);
 
       if (levelshotOverrideMapSet.has(mapName)) continue;
-      suggestions.push({ mapName, imageUrl: getLvlworldUrlForMap(mapName) });
+      suggestions.push({
+        mapName,
+        lvlworldUrl: getLvlworldUrlForMap(mapName),
+        q3dfUrl: getQ3dfUrlForMap(mapName),
+      });
       if (suggestions.length >= 12) break;
     }
 
     return suggestions;
   }, [recentMatchesQuery.data?.matches, levelshotOverrideMapSet]);
+
+  useEffect(() => {
+    setCurrentMapSuggestionSource("lvlworld");
+  }, [currentMapName]);
 
   useEffect(() => {
     const games = adminGamesQuery.data?.games;
@@ -644,6 +659,21 @@ export default function AdminPage() {
     }
 
     setNewLevelshotUrl(getLvlworldUrlForMap(map));
+  };
+
+  const applyQ3dfTemplate = () => {
+    const map = newLevelshotMap.trim().toLowerCase();
+    if (!map) {
+      window.alert("Primero ingresá el nombre del mapa");
+      return;
+    }
+
+    setNewLevelshotFile(null);
+    if (levelshotFileInputRef.current) {
+      levelshotFileInputRef.current.value = "";
+    }
+
+    setNewLevelshotUrl(getQ3dfUrlForMap(map));
   };
 
   const fillCurrentMap = () => {
@@ -1258,12 +1288,19 @@ export default function AdminPage() {
                   <Button
                     type="button"
                     variant="outline"
+                    onClick={applyQ3dfTemplate}
+                  >
+                    Usar URL Q3DF
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
                     onClick={clearLevelshotForm}
                   >
                     Limpiar
                   </Button>
                   <p className="text-xs text-muted-foreground">
-                    Genera: https://lvlworld.com/levels/&lt;mapa&gt;/&lt;mapa&gt;lg.jpg
+                    Fuentes: lvlworld y ws.q3df.org
                   </p>
                 </div>
 
@@ -1317,9 +1354,14 @@ export default function AdminPage() {
                       Mapa actual: {currentMapName} - sin override guardado aún.
                     </p>
                     <img
-                      src={getLvlworldUrlForMap(currentMapName)}
+                      src={currentMapSuggestionSource === "lvlworld" ? getLvlworldUrlForMap(currentMapName) : getQ3dfUrlForMap(currentMapName)}
                       alt={`Sugerencia ${currentMapName}`}
                       className="h-36 w-64 rounded border border-border object-cover"
+                      onError={() => {
+                        if (currentMapSuggestionSource === "lvlworld") {
+                          setCurrentMapSuggestionSource("q3df");
+                        }
+                      }}
                     />
                     <div>
                       <Button
@@ -1327,7 +1369,10 @@ export default function AdminPage() {
                         onClick={() =>
                           saveSuggestedLevelshotMutation.mutate({
                             mapName: currentMapName,
-                            imageUrl: getLvlworldUrlForMap(currentMapName),
+                            imageUrl:
+                              currentMapSuggestionSource === "lvlworld"
+                                ? getLvlworldUrlForMap(currentMapName)
+                                : getQ3dfUrlForMap(currentMapName),
                           })
                         }
                         disabled={saveSuggestedLevelshotMutation.isPending}
@@ -1349,13 +1394,32 @@ export default function AdminPage() {
                       {suggestedLevelshots.map((item) => (
                         <div key={item.mapName} className="rounded border border-border p-2 flex flex-wrap items-center gap-3">
                           <img
-                            src={item.imageUrl}
+                            src={
+                              (suggestionSourceByMap[item.mapName] || "lvlworld") === "lvlworld"
+                                ? item.lvlworldUrl
+                                : item.q3dfUrl
+                            }
                             alt={`Sugerencia ${item.mapName}`}
                             className="h-16 w-28 rounded border border-border object-cover"
+                            onError={() => {
+                              setSuggestionSourceByMap((current) => {
+                                if ((current[item.mapName] || "lvlworld") === "q3df") {
+                                  return current;
+                                }
+                                return {
+                                  ...current,
+                                  [item.mapName]: "q3df",
+                                };
+                              });
+                            }}
                           />
                           <div className="min-w-40">
                             <p className="text-sm font-medium">{item.mapName}</p>
-                            <p className="text-xs text-muted-foreground break-all">{item.imageUrl}</p>
+                            <p className="text-xs text-muted-foreground break-all">
+                              {(suggestionSourceByMap[item.mapName] || "lvlworld") === "lvlworld"
+                                ? item.lvlworldUrl
+                                : item.q3dfUrl}
+                            </p>
                           </div>
                           <div className="ml-auto flex gap-2">
                             <Button
@@ -1363,7 +1427,11 @@ export default function AdminPage() {
                               variant="outline"
                               onClick={() => {
                                 setNewLevelshotMap(item.mapName);
-                                setNewLevelshotUrl(item.imageUrl);
+                                setNewLevelshotUrl(
+                                  (suggestionSourceByMap[item.mapName] || "lvlworld") === "lvlworld"
+                                    ? item.lvlworldUrl
+                                    : item.q3dfUrl,
+                                );
                                 setNewLevelshotFile(null);
                                 if (levelshotFileInputRef.current) {
                                   levelshotFileInputRef.current.value = "";
@@ -1374,7 +1442,15 @@ export default function AdminPage() {
                             </Button>
                             <Button
                               size="sm"
-                              onClick={() => saveSuggestedLevelshotMutation.mutate(item)}
+                              onClick={() =>
+                                saveSuggestedLevelshotMutation.mutate({
+                                  mapName: item.mapName,
+                                  imageUrl:
+                                    (suggestionSourceByMap[item.mapName] || "lvlworld") === "lvlworld"
+                                      ? item.lvlworldUrl
+                                      : item.q3dfUrl,
+                                })
+                              }
                               disabled={saveSuggestedLevelshotMutation.isPending}
                             >
                               Guardar
