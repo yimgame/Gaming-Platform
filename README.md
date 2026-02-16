@@ -63,8 +63,17 @@ QUAKE_BASE_PATH=G:\Games\Quake3\cpma
 
 ### Desarrollo local (Windows)
 
+Opción rápida (recomendada):
+
+```bash
+setup.bat
+```
+
+`setup.bat` hace todo: pide `DATABASE_URL` (con default local `localhost:5433`), crea `.env` si falta, pide `ADMIN_TOKEN` (opcional), instala dependencias y crea/actualiza tablas.
+
 ```bash
 npm install
+init-db.bat
 start-dev.bat
 ```
 
@@ -75,6 +84,11 @@ npm run dev
 ```
 
 Si usas `npm run dev`, define `DATABASE_URL` antes de arrancar.
+
+Primer arranque recomendado:
+
+- `init-db.bat`: crea/actualiza tablas en PostgreSQL usando `DATABASE_URL`
+- Por defecto usa `postgres://postgres:postgres@localhost:5433/app_db`
 
 ### Producción (Docker)
 
@@ -103,6 +117,35 @@ Requisitos mínimos para HTTPS público:
 - `PUT /api/admin/games/:id`
 - `DELETE /api/admin/games/:id`
 - `POST /api/match-assets`
+
+### Levelshots (admin)
+
+- Nueva pestaña `Levelshots` en `/admin` para gestionar imágenes por mapa.
+- Flujo rápido: mapa + URL y `Guardar levelshot`.
+- Carga local de imagen con explorador (`Buscar imagen`) y subida al backend.
+- Preview antes de guardar (archivo local o URL manual).
+- Sugerencias automáticas de mapas recientes sin override.
+- Sugerencia de mapa actual (si está online y no tiene override).
+- Atajos: `Mapa actual`, `Usar URL Lvlworld`, `Usar URL EFSERVERS`, `Usar URL Q3DF`, `Limpiar`.
+- Guardado rápido con tecla `Enter` en campo URL.
+
+Fuentes de levelshots utilizadas:
+
+- `https://lvlworld.com/levels/<mapa>/<mapa>lg.jpg`
+- `https://efservers.com/levelshots/<mapa>.jpg`
+- `https://ws.q3df.org/images/levelshots/512x384/<mapa>.jpg` (recurso alternativo, puede bloquear hotlink/preview)
+
+Endpoints admin levelshots:
+
+- `GET /api/admin/levelshots`
+- `POST /api/admin/levelshots`
+- `DELETE /api/admin/levelshots/:mapName`
+- `POST /api/admin/levelshots/upload`
+
+Endpoints públicos levelshots:
+
+- `GET /api/levelshots/:mapName`
+- `GET /api/levelshots-files/:filename`
 
 ## Stats y assets (Quake 3)
 

@@ -89,8 +89,8 @@ export default function AdminPage() {
   const [newLevelshotPreviewUrl, setNewLevelshotPreviewUrl] = useState("");
   const [newLevelshotPreviewFailed, setNewLevelshotPreviewFailed] = useState(false);
   const [didAutoFillCurrentMap, setDidAutoFillCurrentMap] = useState(false);
-  const [currentMapSuggestionSource, setCurrentMapSuggestionSource] = useState<"lvlworld" | "q3df">("lvlworld");
-  const [suggestionSourceByMap, setSuggestionSourceByMap] = useState<Record<string, "lvlworld" | "q3df">>({});
+  const [currentMapSuggestionSource, setCurrentMapSuggestionSource] = useState<"lvlworld" | "efservers">("lvlworld");
+  const [suggestionSourceByMap, setSuggestionSourceByMap] = useState<Record<string, "lvlworld" | "efservers">>({});
   const levelshotFileInputRef = useRef<HTMLInputElement | null>(null);
   const [drafts, setDrafts] = useState<Record<string, GameConfig>>({});
   const [siteDraft, setSiteDraft] = useState<SiteSettingsData>(DEFAULT_SITE_SETTINGS);
@@ -285,6 +285,11 @@ export default function AdminPage() {
     return map ? `https://lvlworld.com/levels/${map}/${map}lg.jpg` : "";
   };
 
+  const getEfserversUrlForMap = (mapName: string) => {
+    const map = mapName.trim().toLowerCase();
+    return map ? `https://efservers.com/levelshots/${map}.jpg` : "";
+  };
+
   const getQ3dfUrlForMap = (mapName: string) => {
     const map = mapName.trim().toLowerCase();
     return map ? `https://ws.q3df.org/images/levelshots/512x384/${map}.jpg` : "";
@@ -296,7 +301,7 @@ export default function AdminPage() {
   );
 
   const suggestedLevelshots = useMemo(() => {
-    const suggestions: Array<{ mapName: string; lvlworldUrl: string; q3dfUrl: string }> = [];
+    const suggestions: Array<{ mapName: string; lvlworldUrl: string; efserversUrl: string; q3dfUrl: string }> = [];
     const seen = new Set<string>();
 
     for (const match of recentMatchesQuery.data?.matches || []) {
@@ -308,6 +313,7 @@ export default function AdminPage() {
       suggestions.push({
         mapName,
         lvlworldUrl: getLvlworldUrlForMap(mapName),
+        efserversUrl: getEfserversUrlForMap(mapName),
         q3dfUrl: getQ3dfUrlForMap(mapName),
       });
       if (suggestions.length >= 12) break;
@@ -659,6 +665,21 @@ export default function AdminPage() {
     }
 
     setNewLevelshotUrl(getLvlworldUrlForMap(map));
+  };
+
+  const applyEfserversTemplate = () => {
+    const map = newLevelshotMap.trim().toLowerCase();
+    if (!map) {
+      window.alert("Primero ingresá el nombre del mapa");
+      return;
+    }
+
+    setNewLevelshotFile(null);
+    if (levelshotFileInputRef.current) {
+      levelshotFileInputRef.current.value = "";
+    }
+
+    setNewLevelshotUrl(getEfserversUrlForMap(map));
   };
 
   const applyQ3dfTemplate = () => {
@@ -1288,6 +1309,13 @@ export default function AdminPage() {
                   <Button
                     type="button"
                     variant="outline"
+                    onClick={applyEfserversTemplate}
+                  >
+                    Usar URL EFSERVERS
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
                     onClick={applyQ3dfTemplate}
                   >
                     Usar URL Q3DF
@@ -1300,7 +1328,7 @@ export default function AdminPage() {
                     Limpiar
                   </Button>
                   <p className="text-xs text-muted-foreground">
-                    Fuentes: lvlworld y ws.q3df.org
+                    Fuentes: lvlworld, efservers y ws.q3df.org
                   </p>
                 </div>
 
@@ -1354,15 +1382,30 @@ export default function AdminPage() {
                       Mapa actual: {currentMapName} - sin override guardado aún.
                     </p>
                     <img
-                      src={currentMapSuggestionSource === "lvlworld" ? getLvlworldUrlForMap(currentMapName) : getQ3dfUrlForMap(currentMapName)}
+                      src={
+                        currentMapSuggestionSource === "lvlworld"
+                          ? getLvlworldUrlForMap(currentMapName)
+                          : getEfserversUrlForMap(currentMapName)
+                      }
                       alt={`Sugerencia ${currentMapName}`}
                       className="h-36 w-64 rounded border border-border object-cover"
                       onError={() => {
                         if (currentMapSuggestionSource === "lvlworld") {
-                          setCurrentMapSuggestionSource("q3df");
+                          setCurrentMapSuggestionSource("efservers");
                         }
                       }}
                     />
+                    <p className="text-xs text-muted-foreground">
+                      Recursos alternativos: {" "}
+                      <a href={getEfserversUrlForMap(currentMapName)} target="_blank" rel="noreferrer" className="underline">
+                        abrir EFSERVERS
+                      </a>
+                      {" - "}
+                      <a href={getQ3dfUrlForMap(currentMapName)} target="_blank" rel="noreferrer" className="underline">
+                        abrir Q3DF
+                      </a>
+                      {" "}(puede bloquear preview por Cloudflare 403).
+                    </p>
                     <div>
                       <Button
                         size="sm"
@@ -1372,7 +1415,7 @@ export default function AdminPage() {
                             imageUrl:
                               currentMapSuggestionSource === "lvlworld"
                                 ? getLvlworldUrlForMap(currentMapName)
-                                : getQ3dfUrlForMap(currentMapName),
+                                : getEfserversUrlForMap(currentMapName),
                           })
                         }
                         disabled={saveSuggestedLevelshotMutation.isPending}
@@ -1397,18 +1440,18 @@ export default function AdminPage() {
                             src={
                               (suggestionSourceByMap[item.mapName] || "lvlworld") === "lvlworld"
                                 ? item.lvlworldUrl
-                                : item.q3dfUrl
+                                : item.efserversUrl
                             }
                             alt={`Sugerencia ${item.mapName}`}
                             className="h-16 w-28 rounded border border-border object-cover"
                             onError={() => {
                               setSuggestionSourceByMap((current) => {
-                                if ((current[item.mapName] || "lvlworld") === "q3df") {
+                                if ((current[item.mapName] || "lvlworld") === "efservers") {
                                   return current;
                                 }
                                 return {
                                   ...current,
-                                  [item.mapName]: "q3df",
+                                  [item.mapName]: "efservers",
                                 };
                               });
                             }}
@@ -1418,8 +1461,25 @@ export default function AdminPage() {
                             <p className="text-xs text-muted-foreground break-all">
                               {(suggestionSourceByMap[item.mapName] || "lvlworld") === "lvlworld"
                                 ? item.lvlworldUrl
-                                : item.q3dfUrl}
+                                : item.efserversUrl}
                             </p>
+                            <a
+                              href={item.efserversUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-xs underline text-muted-foreground"
+                            >
+                              Abrir EFSERVERS alternativo
+                            </a>
+                            <span className="text-xs text-muted-foreground"> {" · "}</span>
+                            <a
+                              href={item.q3dfUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-xs underline text-muted-foreground"
+                            >
+                              Abrir Q3DF alternativo
+                            </a>
                           </div>
                           <div className="ml-auto flex gap-2">
                             <Button
@@ -1430,7 +1490,7 @@ export default function AdminPage() {
                                 setNewLevelshotUrl(
                                   (suggestionSourceByMap[item.mapName] || "lvlworld") === "lvlworld"
                                     ? item.lvlworldUrl
-                                    : item.q3dfUrl,
+                                    : item.efserversUrl,
                                 );
                                 setNewLevelshotFile(null);
                                 if (levelshotFileInputRef.current) {
@@ -1448,7 +1508,7 @@ export default function AdminPage() {
                                   imageUrl:
                                     (suggestionSourceByMap[item.mapName] || "lvlworld") === "lvlworld"
                                       ? item.lvlworldUrl
-                                      : item.q3dfUrl,
+                                      : item.efserversUrl,
                                 })
                               }
                               disabled={saveSuggestedLevelshotMutation.isPending}
