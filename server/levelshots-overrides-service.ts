@@ -1,5 +1,6 @@
-import fs from "node:fs";
-import path from "node:path";
+import { eq, sql } from "drizzle-orm";
+import { db } from "./db";
+import { levelshotOverrides } from "../shared/schema";
 
 export type LevelshotOverride = {
   mapName: string;
@@ -7,58 +8,58 @@ export type LevelshotOverride = {
   updatedAt: string;
 };
 
-const dataDir = path.resolve(process.cwd(), "data");
-const overridesFilePath = path.join(dataDir, "levelshots-overrides.json");
-
-const ensureFile = async () => {
-  if (!fs.existsSync(dataDir)) {
-    await fs.promises.mkdir(dataDir, { recursive: true });
-  }
-
-  if (!fs.existsSync(overridesFilePath)) {
-    await fs.promises.writeFile(overridesFilePath, "[]\n", "utf-8");
-  }
-};
-
 const normalizeMapName = (mapName: string) => mapName.trim().toLowerCase();
 
-const readOverrides = async (): Promise<LevelshotOverride[]> => {
-  await ensureFile();
-
-  try {
-    const raw = await fs.promises.readFile(overridesFilePath, "utf-8");
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-
-    return parsed
-      .filter((item) => item && typeof item.mapName === "string" && typeof item.imageUrl === "string")
-      .map((item) => ({
-        mapName: normalizeMapName(item.mapName),
-        imageUrl: String(item.imageUrl).trim(),
-        updatedAt: typeof item.updatedAt === "string" ? item.updatedAt : new Date().toISOString(),
-      }));
-  } catch {
-    return [];
-  }
+const getPgErrorCode = (error: unknown): string | undefined => {
+  if (typeof error !== "object" || error === null) return undefined;
+  const maybeCode = (error as { code?: unknown }).code;
+  return typeof maybeCode === "string" ? maybeCode : undefined;
 };
 
-const writeOverrides = async (items: LevelshotOverride[]) => {
-  await ensureFile();
-  const sorted = [...items].sort((a, b) => a.mapName.localeCompare(b.mapName));
-  await fs.promises.writeFile(overridesFilePath, `${JSON.stringify(sorted, null, 2)}\n`, "utf-8");
-};
+const isMissingRelationError = (error: unknown) => getPgErrorCode(error) === "42P01";
 
 export async function listLevelshotOverrides(): Promise<LevelshotOverride[]> {
-  return readOverrides();
+  try {
+    const rows = await db.select().from(levelshotOverrides);
+    return rows
+      .map((row) => ({
+        mapName: normalizeMapName(row.mapName),
+        imageUrl: row.imageUrl,
+        updatedAt: row.updatedAt.toISOString(),
+      }))
+      .sort((a, b) => a.mapName.localeCompare(b.mapName));
+  } catch (error) {
+    if (isMissingRelationError(error)) {
+      return [];
+    }
+    throw error;
+  }
 }
 
 export async function getLevelshotOverride(mapName: string): Promise<LevelshotOverride | null> {
   const normalizedMap = normalizeMapName(mapName);
   if (!normalizedMap) return null;
 
-  const items = await readOverrides();
-  const found = items.find((item) => item.mapName === normalizedMap);
-  return found || null;
+  try {
+    const [row] = await db
+      .select()
+      .from(levelshotOverrides)
+      .where(eq(levelshotOverrides.mapName, normalizedMap))
+      .limit(1);
+
+    if (!row) return null;
+
+    return {
+      mapName: normalizeMapName(row.mapName),
+      imageUrl: row.imageUrl,
+      updatedAt: row.updatedAt.toISOString(),
+    };
+  } catch (error) {
+    if (isMissingRelationError(error)) {
+      return null;
+    }
+    throw error;
+  }
 }
 
 export async function upsertLevelshotOverride(mapName: string, imageUrl: string): Promise<LevelshotOverride> {
@@ -73,35 +74,66 @@ export async function upsertLevelshotOverride(mapName: string, imageUrl: string)
     throw new Error("INVALID_IMAGE_URL");
   }
 
-  const items = await readOverrides();
-  const next: LevelshotOverride = {
-    mapName: normalizedMap,
-    imageUrl: normalizedUrl,
-    updatedAt: new Date().toISOString(),
-  };
+  try {
+    const [existing] = await db
+      .select({ mapName: levelshotOverrides.mapName })
+      .from(levelshotOverrides)
+      .where(eq(levelshotOverrides.mapName, normalizedMap))
+      .limit(1);
 
-  const index = items.findIndex((item) => item.mapName === normalizedMap);
-  if (index >= 0) {
-    items[index] = next;
-  } else {
-    items.push(next);
+    if (existing) {
+      const [updated] = await db
+        .update(levelshotOverrides)
+        .set({
+          imageUrl: normalizedUrl,
+          updatedAt: sql`now()`,
+        })
+        .where(eq(levelshotOverrides.mapName, normalizedMap))
+        .returning();
+
+      return {
+        mapName: normalizeMapName(updated.mapName),
+        imageUrl: updated.imageUrl,
+        updatedAt: updated.updatedAt.toISOString(),
+      };
+    }
+
+    const [created] = await db
+      .insert(levelshotOverrides)
+      .values({
+        mapName: normalizedMap,
+        imageUrl: normalizedUrl,
+      })
+      .returning();
+
+    return {
+      mapName: normalizeMapName(created.mapName),
+      imageUrl: created.imageUrl,
+      updatedAt: created.updatedAt.toISOString(),
+    };
+  } catch (error) {
+    if (isMissingRelationError(error)) {
+      throw new Error("DB_MISSING_LEVELSHOT_TABLE");
+    }
+    throw error;
   }
-
-  await writeOverrides(items);
-  return next;
 }
 
 export async function deleteLevelshotOverride(mapName: string): Promise<boolean> {
   const normalizedMap = normalizeMapName(mapName);
   if (!normalizedMap) return false;
 
-  const items = await readOverrides();
-  const nextItems = items.filter((item) => item.mapName !== normalizedMap);
+  try {
+    const deleted = await db
+      .delete(levelshotOverrides)
+      .where(eq(levelshotOverrides.mapName, normalizedMap))
+      .returning({ mapName: levelshotOverrides.mapName });
 
-  if (nextItems.length === items.length) {
-    return false;
+    return deleted.length > 0;
+  } catch (error) {
+    if (isMissingRelationError(error)) {
+      return false;
+    }
+    throw error;
   }
-
-  await writeOverrides(nextItems);
-  return true;
 }

@@ -20,6 +20,16 @@ export async function getManualMatchAssets(matchId: string, kind?: "screenshot" 
   return db.select().from(matchAssets).where(eq(matchAssets.matchId, matchId));
 }
 
+export async function getManualMatchAssetById(id: string): Promise<MatchAsset | null> {
+  const [asset] = await db
+    .select()
+    .from(matchAssets)
+    .where(eq(matchAssets.id, id))
+    .limit(1);
+
+  return asset ?? null;
+}
+
 export async function createManualMatchAsset(input: MatchAssetInput): Promise<MatchAsset> {
   const [asset] = await db.insert(matchAssets).values({
     matchId: input.matchId,

@@ -24,3 +24,5 @@ pnpm-debug.log*
 *.p12
 *.sqlite
 gpg-public-key.asc
+data/levelshots-images/
+data/match-assets/

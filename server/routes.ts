@@ -10,8 +10,7 @@ import {
 } from "./stats-service";
 import { 
   getAllMatches, 
-  getMatchesByDate, 
-  parseMatchXML 
+  getMatchesByDate 
 } from "./stats-parser";
 import { 
   getAllScreenshots, 
@@ -27,9 +26,18 @@ import {
   getDemosByMatch
 } from "./demos-service";
 import {
+  createManualMatchAsset,
   createManualMatchAssetIfMissing,
+  getManualMatchAssetById,
   getManualMatchAssets
 } from "./match-assets-service";
+import {
+  autoSyncStatsFromXmlToDb,
+  getMatchesByDateFromStatsDb,
+  getMatchesFromStatsDb,
+  isMissingStatsTablesError,
+  syncMatchesToStatsDb,
+} from "./match-stats-db-service";
 import {
   createContactMessage,
   getContactMessages,
@@ -67,12 +75,21 @@ import fs from "fs";
 import multer from "multer";
 
 const LEVELSHOTS_UPLOAD_DIR = path.resolve(process.cwd(), "data", "levelshots-images");
+const MATCH_ASSETS_UPLOAD_DIR = path.resolve(process.cwd(), "data", "match-assets");
+const MATCH_DEMOS_UPLOAD_DIR = path.join(MATCH_ASSETS_UPLOAD_DIR, "demos");
+const MATCH_SCREENSHOTS_UPLOAD_DIR = path.join(MATCH_ASSETS_UPLOAD_DIR, "screenshots");
 
 const ensureLevelshotsUploadDir = async () => {
   await fs.promises.mkdir(LEVELSHOTS_UPLOAD_DIR, { recursive: true });
 };
 
+const ensureMatchAssetsUploadDirs = async () => {
+  await fs.promises.mkdir(MATCH_DEMOS_UPLOAD_DIR, { recursive: true });
+  await fs.promises.mkdir(MATCH_SCREENSHOTS_UPLOAD_DIR, { recursive: true });
+};
+
 const sanitizeMapName = (value: string) => value.toLowerCase().replace(/[^a-z0-9_-]/g, "");
+const sanitizeFileNamePart = (value: string) => value.replace(/[^a-zA-Z0-9_.-]/g, "_");
 
 const levelshotsUpload = multer({
   storage: multer.diskStorage({
@@ -102,8 +119,60 @@ const levelshotsUpload = multer({
   },
 });
 
+const matchAssetsUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, _file, cb) => {
+      const kind = String(req.body?.kind || "").toLowerCase();
+      if (kind === "demo") {
+        cb(null, MATCH_DEMOS_UPLOAD_DIR);
+        return;
+      }
+      if (kind === "screenshot") {
+        cb(null, MATCH_SCREENSHOTS_UPLOAD_DIR);
+        return;
+      }
+      cb(new Error("kind must be demo or screenshot"), MATCH_ASSETS_UPLOAD_DIR);
+    },
+    filename: (req, file, cb) => {
+      const kind = String(req.body?.kind || "").toLowerCase();
+      const extensionFromName = path.extname(file.originalname || "").toLowerCase();
+      const extension = extensionFromName || (kind === "demo" ? ".dm_68" : ".jpg");
+      const baseName = sanitizeFileNamePart(path.basename(file.originalname || "asset", extension));
+      cb(null, `${Date.now()}-${baseName}${extension}`);
+    },
+  }),
+  fileFilter: (req, file, cb) => {
+    const kind = String(req.body?.kind || "").toLowerCase();
+    const extension = path.extname(file.originalname || "").toLowerCase();
+
+    if (kind === "demo") {
+      if (/^\.dm_\d+$/i.test(extension)) {
+        cb(null, true);
+        return;
+      }
+      cb(new Error("Demo invalida. Debe ser .dm_XX"));
+      return;
+    }
+
+    if (kind === "screenshot") {
+      if ((file.mimetype || "").startsWith("image/") || [".tga", ".bmp"].includes(extension)) {
+        cb(null, true);
+        return;
+      }
+      cb(new Error("Captura invalida. Debe ser imagen"));
+      return;
+    }
+
+    cb(new Error("kind must be demo or screenshot"));
+  },
+  limits: {
+    fileSize: 200 * 1024 * 1024,
+  },
+});
+
 export async function registerRoutes(app: Express): Promise<Server> {
   await ensureLevelshotsUploadDir();
+  await ensureMatchAssetsUploadDirs();
 
   const getErrorMessage = (error: unknown) => {
     if (error instanceof Error) return error.message;
@@ -121,6 +190,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const isAdminRequest = (token: string | undefined) => {
     if (!ADMIN_TOKEN) return false;
     return token === ADMIN_TOKEN;
+  };
+
+  const toUploadedMediaEntry = (asset: { id: string; filename: string; sourcePath: string | null }) => {
+    const extension = path.extname(asset.filename || "").toLowerCase();
+    const mimeType =
+      extension === ".png"
+        ? "image/png"
+        : extension === ".jpg" || extension === ".jpeg"
+          ? "image/jpeg"
+          : extension === ".tga"
+            ? "image/tga"
+            : extension === ".bmp"
+              ? "image/bmp"
+              : "application/octet-stream";
+
+    return {
+      filename: asset.filename,
+      path: asset.sourcePath || "",
+      url: `/api/match-assets/files/${encodeURIComponent(asset.id)}`,
+      mimeType,
+    };
   };
 
   app.get("/api/admin/status", async (req, res) => {
@@ -262,6 +352,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ levelshot });
     } catch (error) {
       logRouteError("Error upserting levelshot override", error);
+      if (error instanceof Error && error.message === "DB_MISSING_LEVELSHOT_TABLE") {
+        return res.status(503).json({
+          error: "Levelshot overrides storage not initialized. Run: npm run db:push",
+        });
+      }
       res.status(400).json({ error: "Failed to save levelshot override" });
     }
   });
@@ -383,9 +478,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Obtener todas las partidas
   app.get("/api/stats/matches", async (req, res) => {
     try {
-      const matches = await getAllMatches();
+      await autoSyncStatsFromXmlToDb();
+      let matches = await getMatchesFromStatsDb();
+      if (matches.length === 0) {
+        const parsedMatches = await getAllMatches();
+        if (parsedMatches.length > 0) {
+          await syncMatchesToStatsDb(parsedMatches);
+          matches = await getMatchesFromStatsDb();
+        }
+      }
+
       res.json({ matches });
     } catch (error) {
+      if (isMissingStatsTablesError(error)) {
+        try {
+          const matches = await getAllMatches();
+          return res.json({ matches });
+        } catch (fallbackError) {
+          console.error("Error fetching matches from XML fallback:", fallbackError);
+        }
+      }
       console.error("Error fetching matches:", error);
       res.status(500).json({ error: "Failed to fetch matches" });
     }
@@ -394,12 +506,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Obtener partidas de un día específico
   app.get("/api/stats/matches/:year/:month/:day", async (req, res) => {
     try {
+      await autoSyncStatsFromXmlToDb();
       const { year, month, day } = req.params;
-      const matches = await getMatchesByDate(year, month, day);
+      let matches = await getMatchesByDateFromStatsDb(year, month, day);
+      if (matches.length === 0) {
+        const parsedMatches = await getMatchesByDate(year, month, day);
+        if (parsedMatches.length > 0) {
+          await syncMatchesToStatsDb(parsedMatches);
+          matches = await getMatchesByDateFromStatsDb(year, month, day);
+        }
+      }
+
       res.json({ matches });
     } catch (error) {
+      if (isMissingStatsTablesError(error)) {
+        try {
+          const { year, month, day } = req.params;
+          const matches = await getMatchesByDate(year, month, day);
+          return res.json({ matches });
+        } catch (fallbackError) {
+          console.error("Error fetching matches by date from XML fallback:", fallbackError);
+        }
+      }
       console.error("Error fetching matches by date:", error);
       res.status(500).json({ error: "Failed to fetch matches" });
+    }
+  });
+
+  app.post("/api/admin/stats/sync", async (req, res) => {
+    const token = req.header("x-admin-token") || req.query.adminToken as string | undefined;
+    if (!isAdminRequest(token)) {
+      return res.status(403).json({ error: "Admin token required" });
+    }
+
+    try {
+      const summary = await autoSyncStatsFromXmlToDb(0);
+      res.json({
+        ok: true,
+        imported: summary.imported,
+      });
+    } catch (error) {
+      console.error("Error syncing match stats to DB:", error);
+      res.status(500).json({ error: "Failed to sync stats" });
     }
   });
   
@@ -515,7 +663,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           console.error("Error fetching manual screenshot assets, using auto match only:", error);
         }
       }
-      const manualFilenames = manualAssets.map(asset => asset.filename);
+      const uploadedAssets = manualAssets.filter((asset) => Boolean(asset.sourcePath));
+      const uploadedScreenshots = uploadedAssets.map(toUploadedMediaEntry);
+      const manualFilenames = manualAssets
+        .filter((asset) => !asset.sourcePath)
+        .map(asset => asset.filename);
       
       const screenshots = await getScreenshotsByMatch(
         type as string,
@@ -524,8 +676,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         4,
         manualFilenames
       );
+
+      const mergedScreenshots = [...uploadedScreenshots, ...screenshots];
+      const seenScreenshots = new Set<string>();
+      const uniqueScreenshots = mergedScreenshots.filter((item) => {
+        const key = item.url;
+        if (seenScreenshots.has(key)) return false;
+        seenScreenshots.add(key);
+        return true;
+      });
       
-      res.json({ screenshots });
+      res.json({ screenshots: uniqueScreenshots });
     } catch (error) {
       console.error("Error fetching match screenshots:", error);
       res.status(500).json({ error: "Failed to fetch match screenshots" });
@@ -584,7 +745,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           console.error("Error fetching manual demo assets, using auto match only:", error);
         }
       }
-      const manualFilenames = manualAssets.map(asset => asset.filename);
+      const uploadedAssets = manualAssets.filter((asset) => Boolean(asset.sourcePath));
+      const uploadedDemos = uploadedAssets.map(toUploadedMediaEntry);
+      const manualFilenames = manualAssets
+        .filter((asset) => !asset.sourcePath)
+        .map(asset => asset.filename);
 
       const demos = await getDemosByMatch(
         type as string,
@@ -594,7 +759,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         manualFilenames
       );
 
-      res.json({ demos });
+      const mergedDemos = [...uploadedDemos, ...demos];
+      const seenDemos = new Set<string>();
+      const uniqueDemos = mergedDemos.filter((item) => {
+        const key = item.url;
+        if (seenDemos.has(key)) return false;
+        seenDemos.add(key);
+        return true;
+      });
+
+      res.json({ demos: uniqueDemos });
     } catch (error) {
       console.error("Error fetching match demos:", error);
       res.status(500).json({ error: "Failed to fetch match demos" });
@@ -673,6 +847,92 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error creating match asset:", error);
       res.status(500).json({ error: "Failed to create match asset" });
+    }
+  });
+
+  app.post("/api/match-assets/upload", (req, res) => {
+    const token = req.header("x-admin-token") || req.query.adminToken as string | undefined;
+    if (!isAdminRequest(token)) {
+      return res.status(403).json({ error: "Admin token required" });
+    }
+
+    matchAssetsUpload.single("file")(req, res, async (uploadError) => {
+      if (uploadError) {
+        const message = uploadError instanceof Error ? uploadError.message : "Upload error";
+        return res.status(400).json({ error: message });
+      }
+
+      try {
+        const file = (req as unknown as { file?: { filename: string; path: string; originalname: string } }).file;
+        const matchId = String(req.body?.matchId || "").trim();
+        const kind = String(req.body?.kind || "").trim() as "screenshot" | "demo";
+
+        if (!matchId || !kind || (kind !== "screenshot" && kind !== "demo")) {
+          return res.status(400).json({ error: "Missing required fields: matchId, kind" });
+        }
+
+        if (!file) {
+          return res.status(400).json({ error: "No file provided" });
+        }
+
+        const asset = await createManualMatchAsset({
+          matchId,
+          kind,
+          filename: file.originalname || file.filename,
+          sourcePath: file.path,
+        });
+
+        return res.status(201).json({
+          asset,
+          fileUrl: `/api/match-assets/files/${encodeURIComponent(asset.id)}`,
+        });
+      } catch (error) {
+        logRouteError("Error uploading match asset", error);
+        return res.status(500).json({ error: "Failed to upload match asset" });
+      }
+    });
+  });
+
+  app.get("/api/match-assets/files/:assetId", async (req, res) => {
+    try {
+      const assetId = String(req.params.assetId || "").trim();
+      if (!assetId) {
+        return res.status(400).json({ error: "Missing assetId" });
+      }
+
+      const asset = await getManualMatchAssetById(assetId);
+      if (!asset || !asset.sourcePath) {
+        return res.status(404).json({ error: "Asset not found" });
+      }
+
+      if (!fs.existsSync(asset.sourcePath)) {
+        return res.status(404).json({ error: "File not found" });
+      }
+
+      const ext = path.extname(asset.filename || "").toLowerCase();
+      const mimeType =
+        ext === ".png"
+          ? "image/png"
+          : ext === ".jpg" || ext === ".jpeg"
+            ? "image/jpeg"
+            : ext === ".tga"
+              ? "image/tga"
+              : ext === ".bmp"
+                ? "image/bmp"
+                : "application/octet-stream";
+
+      res.setHeader("Content-Type", mimeType);
+      res.setHeader("Cache-Control", "public, max-age=31536000");
+
+      if (asset.kind === "demo") {
+        res.setHeader("Content-Disposition", `attachment; filename="${asset.filename}"`);
+      }
+
+      const fileStream = fs.createReadStream(asset.sourcePath);
+      fileStream.pipe(res);
+    } catch (error) {
+      logRouteError("Error serving uploaded match asset", error);
+      res.status(500).json({ error: "Failed to serve uploaded match asset" });
     }
   });
   

@@ -1,12 +1,15 @@
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Gamepad2, Server, Globe } from "lucide-react";
+import { useSiteSettings } from "@/hooks/use-site-settings";
 
 export default function HeroSection() {
   const [displayText, setDisplayText] = useState("");
-  const fullText = "Yim Game | CS2 • Quake • Minecraft";
+  const { settings } = useSiteSettings();
+  const fullText = settings.heroSubtitle;
 
   useEffect(() => {
+    setDisplayText("");
     let currentIndex = 0;
     const interval = setInterval(() => {
       if (currentIndex <= fullText.length) {
@@ -18,7 +21,7 @@ export default function HeroSection() {
     }, 50);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [fullText]);
 
   const scrollToSection = (id: string) => {
     const element = document.getElementById(id);
@@ -64,7 +67,7 @@ export default function HeroSection() {
           }}
           data-testid="text-hero-title"
         >
-          Yim Game
+          {settings.siteName}
         </h1>
 
         <div className="font-mono text-xl sm:text-2xl md:text-3xl mb-8 h-12 text-foreground/90">
@@ -73,8 +76,7 @@ export default function HeroSection() {
         </div>
 
         <p className="text-lg sm:text-xl text-foreground/70 mb-12 max-w-2xl mx-auto font-light" data-testid="text-hero-description">
-          Servidores dedicados, comunidad activa y eventos.
-          La mejor experiencia de juego online en un solo lugar.
+          {settings.heroDescription}
         </p>
 
         <div className="flex flex-col sm:flex-row gap-4 justify-center">

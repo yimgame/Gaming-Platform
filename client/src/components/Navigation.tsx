@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { Menu, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useSiteSettings } from "@/hooks/use-site-settings";
 
 export default function Navigation() {
   const [isOpen, setIsOpen] = useState(false);
+  const { settings } = useSiteSettings();
 
   const scrollToSection = (id: string) => {
     const element = document.getElementById(id);
@@ -26,7 +28,7 @@ export default function Navigation() {
             onClick={() => scrollToSection("hero")}
             data-testid="link-logo"
           >
-            Yim Game
+            {settings.siteName}
           </div>
 
           <div className="hidden md:flex items-center gap-8">

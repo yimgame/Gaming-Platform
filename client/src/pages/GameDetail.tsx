@@ -22,30 +22,25 @@ import ServerStatsOverview from "@/components/ServerStatsOverview";
 import ScreenshotsGallery from "@/components/ScreenshotsGallery";
 import type { QuakeServerStatus } from "@shared/stats-schema";
 import type { GameConfig } from "@shared/games-config";
-import { defaultGamesCatalog } from "@/lib/defaultGames";
 
 export default function GameDetailPage() {
   const [, params] = useRoute("/games/:gameId");
   const gameId = params?.gameId || "";
 
-  const { data: gamesData } = useQuery<{ games: GameConfig[] }>({
+  const { data: gamesData, isLoading: isGamesLoading, error: gamesError } = useQuery<{ games: GameConfig[] }>({
     queryKey: ["games-catalog"],
     queryFn: async () => {
-      try {
-        const response = await fetch("/api/games");
-        if (!response.ok) {
-          return { games: defaultGamesCatalog };
-        }
-
-        const payload = await response.json();
-        if (!payload?.games || !Array.isArray(payload.games) || payload.games.length === 0) {
-          return { games: defaultGamesCatalog };
-        }
-
-        return payload;
-      } catch {
-        return { games: defaultGamesCatalog };
+      const response = await fetch("/api/games");
+      if (!response.ok) {
+        throw new Error("No se pudo leer el catálogo de juegos");
       }
+
+      const payload = await response.json();
+      if (!payload?.games || !Array.isArray(payload.games)) {
+        throw new Error("Formato inválido de catálogo de juegos");
+      }
+
+      return payload;
     },
   });
 
@@ -122,10 +117,27 @@ export default function GameDetailPage() {
     setMapImageLoaded(false);
   }, [showLevelshot, placeholderMapImage]);
 
-  if (!gamesData) {
+  if (isGamesLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <p className="text-muted-foreground">Cargando juego...</p>
+      </div>
+    );
+  }
+
+  if (gamesError) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <h1 className="text-4xl font-bold mb-4">No se pudo cargar el juego</h1>
+          <p className="text-muted-foreground mb-6">Revisá que el backend esté corriendo y que /api/games responda correctamente.</p>
+          <Link href="/">
+            <Button>
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Volver al inicio
+            </Button>
+          </Link>
+        </div>
       </div>
     );
   }

@@ -75,6 +75,11 @@ function parsePlayer(playerData: any): PlayerStats {
     acc[stat.$.name] = stat.$.value;
     return acc;
   }, {}) || {};
+  const numericStats = Object.entries(stats).reduce<Record<string, number>>((acc, [key, value]) => {
+    const parsedValue = parseInt(String(value), 10);
+    acc[key] = Number.isNaN(parsedValue) ? 0 : parsedValue;
+    return acc;
+  }, {});
   
   const weapons: WeaponStats[] = player.weapons?.[0]?.weapon?.map((weapon: any) => ({
     name: weapon.$.name,
@@ -109,8 +114,11 @@ function parsePlayer(playerData: any): PlayerStats {
     net: parseInt(stats.Net) || 0,
     damageGiven: parseInt(stats.DamageGiven) || 0,
     damageTaken: parseInt(stats.DamageTaken) || 0,
+    teamDamage: parseInt(stats.TeamDamage) || 0,
+    teamKills: parseInt(stats.TeamKills) || 0,
     healthTotal: parseInt(stats.HealthTotal) || 0,
     armorTotal: parseInt(stats.ArmorTotal) || 0,
+    rawStats: numericStats,
     weapons,
     items,
     powerups,

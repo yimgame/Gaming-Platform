@@ -1,12 +1,17 @@
-import { Github, Linkedin, Twitter, Mail } from "lucide-react";
+import { Github, Youtube, Mail } from "lucide-react";
+import { BsDiscord } from "react-icons/bs";
+import { SiGithubcopilot } from "react-icons/si";
 import { Button } from "@/components/ui/button";
+import { useSiteSettings } from "@/hooks/use-site-settings";
 
 export default function Footer() {
+  const { settings } = useSiteSettings();
+
   const socialLinks = [
-    { icon: Github, href: "#", label: "GitHub", color: "text-primary" },
-    { icon: Linkedin, href: "#", label: "LinkedIn", color: "text-secondary" },
-    { icon: Twitter, href: "#", label: "Twitter", color: "text-accent" },
-    { icon: Mail, href: "#", label: "Email", color: "text-neon-green" },
+    { icon: Github, href: settings.footerGithubUrl, label: "GitHub", color: "text-primary" },
+    { icon: BsDiscord, href: settings.footerDiscordUrl, label: "Discord", color: "text-secondary" },
+    { icon: Youtube, href: settings.footerYoutubeUrl, label: "YouTube", color: "text-accent" },
+    { icon: Mail, href: `mailto:${settings.footerEmail}`, label: "Email", color: "text-neon-green" },
   ];
 
   return (
@@ -21,7 +26,7 @@ export default function Footer() {
               filter: "drop-shadow(0 0 12px currentColor)",
             }}
           >
-            Yim Game
+            {settings.siteName}
           </div>
 
           <div className="flex gap-4">
@@ -47,10 +52,11 @@ export default function Footer() {
 
           <div className="text-center space-y-2">
             <p className="text-foreground/60 text-sm font-mono" data-testid="text-footer-copyright">
-              © 2026 Yim Game. Todos los derechos reservados.
+              {settings.footerCopyright}
             </p>
-            <p className="text-foreground/40 text-xs">
-              Desarrollado por GitHub Copilot
+            <p className="text-foreground/40 text-xs flex items-center justify-center gap-1">
+              <SiGithubcopilot className="h-3.5 w-3.5" />
+              {settings.footerDevelopedBy}
             </p>
           </div>
         </div>

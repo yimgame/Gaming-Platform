@@ -170,6 +170,7 @@
     "supportsQuakeStats": false
   },
   {
+    "id": "Quake4",
     "title": "Quake 4",
     "description": "Quake 4 es un videojuego de disparos en primera persona ",
     "longDescription": "Quake 4 es un videojuego de disparos en primera persona lanzado originalmente en 2005, desarrollado por Raven Software en colaboración con id Software. Como secuela directa de Quake II, la historia sigue al marine Matthew Kane en la invasión del planeta alienígena de los Strogg, destacando por su icónica escena de \"stroggificación\" en la que el protagonista es transformado parcialmente en alienígena. ",
@@ -190,7 +191,46 @@
       "screenshotsPath": "G:\\Games\\Quake4",
       "demosPath": "G:\\Games\\Quake4"
     },
-    "supportsQuakeStats": false,
-    "id": "Quake4"
+    "supportsQuakeStats": false
+  },
+  {
+    "id": "Diablo2",
+    "title": "Diablo 2",
+    "description": "Nuevo juego",
+    "longDescription": "Descripción pendiente",
+    "cardImage": "/quake3-hero.jpg",
+    "backgroundImage": "/quake3-hero.jpg",
+    "connectUrl": "",
+    "status": "offline",
+    "playerCount": "0/0",
+    "tags": [],
+    "features": [],
+    "paths": {
+      "basePath": "",
+      "statsPath": "",
+      "screenshotsPath": "",
+      "demosPath": ""
+    },
+    "supportsQuakeStats": false
+  },
+  {
+    "id": "Warcraft3",
+    "title": "Warcraft 3",
+    "description": "Nuevo juego",
+    "longDescription": "Descripción pendiente",
+    "cardImage": "/quake3-hero.jpg",
+    "backgroundImage": "/quake3-hero.jpg",
+    "connectUrl": "",
+    "status": "offline",
+    "playerCount": "0/0",
+    "tags": [],
+    "features": [],
+    "paths": {
+      "basePath": "",
+      "statsPath": "",
+      "screenshotsPath": "",
+      "demosPath": ""
+    },
+    "supportsQuakeStats": false
   }
 ]

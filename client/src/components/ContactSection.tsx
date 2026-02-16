@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Mail, MessageSquare, User, Send } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useSiteSettings } from "@/hooks/use-site-settings";
 
 export default function ContactSection() {
   const [formData, setFormData] = useState({
@@ -11,16 +12,41 @@ export default function ContactSection() {
     email: "",
     message: "",
   });
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const { toast } = useToast();
+  const { settings } = useSiteSettings();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log("Form submitted:", formData);
-    toast({
-      title: "Message Sent!",
-      description: "Thanks for reaching out. I'll get back to you soon.",
-    });
-    setFormData({ name: "", email: "", message: "" });
+
+    try {
+      setIsSubmitting(true);
+      const response = await fetch("/api/contact-messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(formData),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to send message");
+      }
+
+      toast({
+        title: settings.contactSuccessTitle,
+        description: settings.contactSuccessDescription,
+      });
+      setFormData({ name: "", email: "", message: "" });
+    } catch (_error) {
+      toast({
+        title: "Error",
+        description: "No se pudo enviar el mensaje",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -44,13 +70,13 @@ export default function ContactSection() {
             }}
             data-testid="text-contact-title"
           >
-            Get In Touch
+            {settings.contactTitle}
           </h2>
           <div className="w-32 h-1 bg-gradient-to-r from-transparent via-secondary to-transparent mx-auto mb-6" 
             style={{ filter: "drop-shadow(0 0 8px rgb(255 0 110))" }} 
           />
           <p className="text-foreground/70 text-lg" data-testid="text-contact-subtitle">
-            Have a project in mind? Let's work together
+            {settings.contactSubtitle}
           </p>
         </div>
 
@@ -65,11 +91,11 @@ export default function ContactSection() {
             <div className="space-y-2">
               <label className="text-sm font-medium text-foreground/80 flex items-center gap-2">
                 <User className="w-4 h-4 text-primary" />
-                Name
+                {settings.contactNameLabel}
               </label>
               <Input
                 type="text"
-                placeholder="Your name"
+                placeholder={settings.contactNamePlaceholder}
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                 className="bg-background/50 border-primary/30 focus:border-primary text-foreground placeholder:text-foreground/40"
@@ -82,11 +108,11 @@ export default function ContactSection() {
             <div className="space-y-2">
               <label className="text-sm font-medium text-foreground/80 flex items-center gap-2">
                 <Mail className="w-4 h-4 text-secondary" />
-                Email
+                {settings.contactEmailLabel}
               </label>
               <Input
                 type="email"
-                placeholder="your.email@example.com"
+                placeholder={settings.contactEmailPlaceholder}
                 value={formData.email}
                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                 className="bg-background/50 border-secondary/30 focus:border-secondary text-foreground placeholder:text-foreground/40"
@@ -99,10 +125,10 @@ export default function ContactSection() {
             <div className="space-y-2">
               <label className="text-sm font-medium text-foreground/80 flex items-center gap-2">
                 <MessageSquare className="w-4 h-4 text-accent" />
-                Message
+                {settings.contactMessageLabel}
               </label>
               <Textarea
-                placeholder="Tell me about your project..."
+                placeholder={settings.contactMessagePlaceholder}
                 value={formData.message}
                 onChange={(e) => setFormData({ ...formData, message: e.target.value })}
                 className="bg-background/50 border-accent/30 focus:border-accent text-foreground placeholder:text-foreground/40 min-h-[150px]"
@@ -115,6 +141,7 @@ export default function ContactSection() {
             <Button
               type="submit"
               size="lg"
+              disabled={isSubmitting}
               className="w-full bg-gradient-to-r from-primary to-secondary text-white font-semibold"
               style={{
                 filter: "drop-shadow(0 0 16px rgb(0 240 255 / 0.5))",
@@ -122,8 +149,12 @@ export default function ContactSection() {
               data-testid="button-submit"
             >
               <Send className="w-5 h-5 mr-2" />
-              Send Message
+              {isSubmitting ? "Enviando..." : settings.contactButtonLabel}
             </Button>
+
+            <p className="text-xs text-foreground/50 text-center">
+              {settings.contactDestination}
+            </p>
           </form>
         </div>
       </div>

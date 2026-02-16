@@ -1,30 +1,88 @@
 import type { MatchStats, PlayerStats, PlayerRanking, RankingFilters } from '../shared/stats-schema';
 import { getAllMatches, getMatchesInDateRange } from './stats-parser';
+import {
+  autoSyncStatsFromXmlToDb,
+  getMatchesFromStatsDb,
+  getStatsMatchesCount,
+  isMissingStatsTablesError,
+  syncMatchesToStatsDb,
+} from './match-stats-db-service';
+
+let initialSyncPromise: Promise<void> | null = null;
+
+async function ensureStatsSeededInDb() {
+  if (initialSyncPromise) {
+    await initialSyncPromise;
+    return;
+  }
+
+  initialSyncPromise = (async () => {
+    const existingCount = await getStatsMatchesCount();
+    if (existingCount > 0) return;
+
+    const parsedMatches = await getAllMatches();
+    if (parsedMatches.length === 0) return;
+
+    await syncMatchesToStatsDb(parsedMatches);
+  })();
+
+  try {
+    await initialSyncPromise;
+  } finally {
+    initialSyncPromise = null;
+  }
+}
+
+async function getMatchesForStats(filters: Partial<RankingFilters> = {}): Promise<MatchStats[]> {
+  try {
+    await ensureStatsSeededInDb();
+    await autoSyncStatsFromXmlToDb();
+    const startDate = filters.startDate ? new Date(filters.startDate) : undefined;
+    const endDate = filters.endDate ? new Date(filters.endDate) : undefined;
+
+    return await getMatchesFromStatsDb({
+      startDate,
+      endDate,
+      map: filters.map,
+      gameType: filters.gameType,
+    });
+  } catch (error) {
+    if (!isMissingStatsTablesError(error)) {
+      console.error("Error loading stats from DB. Using XML fallback:", error);
+    }
+
+    if (filters.startDate || filters.endDate) {
+      const startDate = filters.startDate ? new Date(filters.startDate) : undefined;
+      const endDate = filters.endDate ? new Date(filters.endDate) : undefined;
+      let matches = await getMatchesInDateRange(startDate, endDate);
+
+      if (filters.map) {
+        matches = matches.filter(m => m.map === filters.map);
+      }
+
+      if (filters.gameType) {
+        matches = matches.filter(m => m.type === filters.gameType);
+      }
+
+      return matches;
+    }
+
+    let matches = await getAllMatches();
+    if (filters.map) {
+      matches = matches.filter(m => m.map === filters.map);
+    }
+    if (filters.gameType) {
+      matches = matches.filter(m => m.type === filters.gameType);
+    }
+    return matches;
+  }
+}
 
 /**
  * Calcula el ranking global de jugadores basado en los filtros
  */
 export async function calculateGlobalRanking(filters: Partial<RankingFilters> = {}): Promise<PlayerRanking[]> {
-  // Obtener partidas según filtros de fecha
-  let matches: MatchStats[] = [];
-  
-  if (filters.startDate || filters.endDate) {
-    const startDate = filters.startDate ? new Date(filters.startDate) : undefined;
-    const endDate = filters.endDate ? new Date(filters.endDate) : undefined;
-    matches = await getMatchesInDateRange(startDate, endDate);
-  } else {
-    matches = await getAllMatches();
-  }
-  
-  // Filtrar por mapa
-  if (filters.map) {
-    matches = matches.filter(m => m.map === filters.map);
-  }
-  
-  // Filtrar por tipo de juego
-  if (filters.gameType) {
-    matches = matches.filter(m => m.type === filters.gameType);
-  }
+  const matches = await getMatchesForStats(filters);
   
   // Agregar estadísticas por jugador
   const playerStatsMap = new Map<string, {
@@ -179,7 +237,7 @@ export function getMatchRanking(match: MatchStats): PlayerRanking[] {
  * Obtiene estadísticas generales del servidor
  */
 export async function getServerStats() {
-  const matches = await getAllMatches();
+  const matches = await getMatchesForStats();
   
   const playerNames = new Set<string>();
   let totalKills = 0;

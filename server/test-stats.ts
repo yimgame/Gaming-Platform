@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { getAllMatches, getMatchesByDate, parseMatchXML } from './stats-parser';
 import { calculateGlobalRanking, getServerStats } from './stats-service';
 

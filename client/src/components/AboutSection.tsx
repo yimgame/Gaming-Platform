@@ -1,26 +1,18 @@
 import { useEffect, useState } from "react";
 import { Terminal } from "lucide-react";
-
-const terminalLines = [
-  { delay: 0, text: "$ whoami" },
-  { delay: 500, text: "> Security Researcher | Red Team Operator | DevOps Engineer" },
-  { delay: 1000, text: "" },
-  { delay: 1200, text: "$ cat experience.txt" },
-  { delay: 1700, text: "> 8+ years in cybersecurity and infrastructure automation" },
-  { delay: 2200, text: "> Specialized in offensive security and cloud-native architectures" },
-  { delay: 2700, text: "> Led red team engagements for Fortune 500 companies" },
-  { delay: 3200, text: "" },
-  { delay: 3400, text: "$ grep -i 'passion' mission.log" },
-  { delay: 3900, text: "> Breaking systems to build better security" },
-  { delay: 4400, text: "> Automating the impossible" },
-  { delay: 4900, text: "> Teaching others to think like attackers" },
-];
+import { useSiteSettings } from "@/hooks/use-site-settings";
 
 export default function AboutSection() {
   const [visibleLines, setVisibleLines] = useState<number>(0);
+  const { settings } = useSiteSettings();
+
+  const terminalLines = settings.aboutLines.map((text, index) => ({
+    text,
+    delay: index * 450,
+  }));
 
   useEffect(() => {
-    const maxDelay = Math.max(...terminalLines.map(line => line.delay));
+    setVisibleLines(0);
     const timers = terminalLines.map((line, index) => 
       setTimeout(() => {
         setVisibleLines(index + 1);
@@ -28,7 +20,7 @@ export default function AboutSection() {
     );
 
     return () => timers.forEach(timer => clearTimeout(timer));
-  }, []);
+  }, [terminalLines]);
 
   return (
     <section id="about" className="relative py-24 px-4 sm:px-6 lg:px-8">
@@ -51,7 +43,7 @@ export default function AboutSection() {
             }}
             data-testid="text-about-title"
           >
-            About Me
+            {settings.aboutTitle}
           </h2>
           <div className="w-32 h-1 bg-gradient-to-r from-transparent via-primary to-transparent mx-auto" 
             style={{ filter: "drop-shadow(0 0 8px rgb(0 240 255))" }} 

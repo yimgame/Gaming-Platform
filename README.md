@@ -163,13 +163,20 @@ Endpoints públicos levelshots:
 
 ## Stats y assets (Quake 3)
 
-- Stats se leen de XML CPMA (no de PostgreSQL)
-- PostgreSQL se usa para datos de app (por ejemplo asociaciones manuales)
+- Stats se sincronizan de XML CPMA a PostgreSQL (sync inicial + auto-sync en runtime)
+- PostgreSQL guarda partidas completas, jugadores, equipos, armas, items y powerups
+- Demos/capturas manuales pueden subirse al servidor y quedan asociadas en PostgreSQL
 - Correlación automática por ventana temporal ±4 min
 - Script de backfill:
 
 ```bash
 npm run assets:auto-associate
+```
+
+Script de sincronización completa de stats:
+
+```bash
+npm run stats:sync
 ```
 
 Endpoints principales:

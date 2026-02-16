@@ -1,7 +1,8 @@
+import "dotenv/config";
 import fs from "node:fs";
 import path from "node:path";
 
-export const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "aca tu token secreto";
+export const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "";
 
 const DEFAULT_QUAKE1_BASE_PATH = "G:\\Games\\Quake\\id1";
 const DEFAULT_QUAKE2_BASE_PATH = "G:\\Games\\Quake2\\baseq2";

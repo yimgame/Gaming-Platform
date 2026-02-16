@@ -2,27 +2,22 @@ import GameCard from "./GameCard";
 import { useQuery } from "@tanstack/react-query";
 import type { QuakeServerStatus } from "@shared/stats-schema";
 import type { GameConfig } from "@shared/games-config";
-import { defaultGamesCatalog } from "@/lib/defaultGames";
 
 export default function GamesSection() {
   const { data: gamesData } = useQuery<{ games: GameConfig[] }>({
     queryKey: ["games-catalog"],
     queryFn: async () => {
-      try {
-        const response = await fetch("/api/games");
-        if (!response.ok) {
-          return { games: defaultGamesCatalog };
-        }
-
-        const payload = await response.json();
-        if (!payload?.games || !Array.isArray(payload.games) || payload.games.length === 0) {
-          return { games: defaultGamesCatalog };
-        }
-
-        return payload;
-      } catch {
-        return { games: defaultGamesCatalog };
+      const response = await fetch("/api/games");
+      if (!response.ok) {
+        throw new Error("No se pudo leer el catálogo de juegos");
       }
+
+      const payload = await response.json();
+      if (!payload?.games || !Array.isArray(payload.games)) {
+        throw new Error("Formato inválido de catálogo de juegos");
+      }
+
+      return payload;
     },
   });
 

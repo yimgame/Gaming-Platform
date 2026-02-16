@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { getAllMatches } from "./stats-parser";
 import { getScreenshotsByMatch } from "./screenshots-service";
 import { getDemosByMatch } from "./demos-service";

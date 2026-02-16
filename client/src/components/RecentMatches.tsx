@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/table";
 import { Calendar, Image as ImageIcon } from "lucide-react";
 import type { MatchStats } from "@shared/stats-schema";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 interface Screenshot {
   filename: string;
@@ -74,7 +74,11 @@ function MatchDetailsDialog({ match, open, onOpenChange }: { match: MatchStats |
   const queryClient = useQueryClient();
   const [manualScreenshotFilename, setManualScreenshotFilename] = useState("");
   const [manualDemoFilename, setManualDemoFilename] = useState("");
+  const [manualScreenshotFile, setManualScreenshotFile] = useState<File | null>(null);
+  const [manualDemoFile, setManualDemoFile] = useState<File | null>(null);
   const [adminToken, setAdminToken] = useState("");
+  const screenshotFileInputRef = useRef<HTMLInputElement | null>(null);
+  const demoFileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -103,7 +107,28 @@ function MatchDetailsDialog({ match, open, onOpenChange }: { match: MatchStats |
   const adminEnabled = Boolean(adminStatusQuery.data?.enabled);
 
   const associateAssetMutation = useMutation({
-    mutationFn: async ({ kind, filename }: { kind: "screenshot" | "demo"; filename: string }) => {
+    mutationFn: async ({ kind, filename, file }: { kind: "screenshot" | "demo"; filename: string; file?: File | null }) => {
+      if (file) {
+        const formData = new FormData();
+        formData.append("matchId", match.id);
+        formData.append("kind", kind);
+        formData.append("file", file);
+
+        const uploadResponse = await fetch("/api/match-assets/upload", {
+          method: "POST",
+          headers: {
+            "x-admin-token": adminToken,
+          },
+          body: formData,
+        });
+
+        if (!uploadResponse.ok) {
+          throw new Error("No se pudo subir el archivo");
+        }
+
+        return uploadResponse.json();
+      }
+
       const response = await fetch("/api/match-assets", {
         method: "POST",
         headers: {
@@ -126,9 +151,17 @@ function MatchDetailsDialog({ match, open, onOpenChange }: { match: MatchStats |
     onSuccess: (_data, variables) => {
       if (variables.kind === "screenshot") {
         setManualScreenshotFilename("");
+        setManualScreenshotFile(null);
+        if (screenshotFileInputRef.current) {
+          screenshotFileInputRef.current.value = "";
+        }
         queryClient.invalidateQueries({ queryKey: ["match-screenshots", match.id] });
       } else {
         setManualDemoFilename("");
+        setManualDemoFile(null);
+        if (demoFileInputRef.current) {
+          demoFileInputRef.current.value = "";
+        }
         queryClient.invalidateQueries({ queryKey: ["match-demos", match.id] });
       }
     },
@@ -136,11 +169,25 @@ function MatchDetailsDialog({ match, open, onOpenChange }: { match: MatchStats |
 
   const handleManualAssociate = (kind: "screenshot" | "demo") => {
     const filename = (kind === "screenshot" ? manualScreenshotFilename : manualDemoFilename).trim();
+    const file = kind === "screenshot" ? manualScreenshotFile : manualDemoFile;
+
     if (!filename) {
       window.alert("Ingresá el nombre del archivo para asociar");
       return;
     }
-    associateAssetMutation.mutate({ kind, filename });
+
+    associateAssetMutation.mutate({ kind, filename, file });
+  };
+
+  const handleLocalFilePick = (kind: "screenshot" | "demo", file: File | null) => {
+    if (!file) return;
+    if (kind === "screenshot") {
+      setManualScreenshotFile(file);
+      setManualScreenshotFilename(file.name);
+      return;
+    }
+    setManualDemoFile(file);
+    setManualDemoFilename(file.name);
   };
 
   // Buscar screenshots por partida
@@ -243,9 +290,27 @@ function MatchDetailsDialog({ match, open, onOpenChange }: { match: MatchStats |
 
                 {adminEnabled && (
                   <div className="mt-3 space-y-2">
+                    <input
+                      ref={demoFileInputRef}
+                      type="file"
+                      className="hidden"
+                      accept=".dm_67,.dm_68,.dm_69,.dm_70,.dm_71,.dm_72,.dm_73,.dm_74,.dm_75,.dm_76,.dm_77,.dm_78,.dm_79,.dm_80,.dm_81,.dm_82,.dm_83,.dm_84,.dm_85,.dm_86,.dm_87,.dm_88,.dm_89,.dm_90"
+                      onChange={(event) => handleLocalFilePick("demo", event.target.files?.[0] ?? null)}
+                    />
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      className="w-full"
+                      onClick={() => demoFileInputRef.current?.click()}
+                    >
+                      Buscar demo en la PC
+                    </Button>
                     <Input
                       value={manualDemoFilename}
-                      onChange={(event) => setManualDemoFilename(event.target.value)}
+                      onChange={(event) => {
+                        setManualDemoFile(null);
+                        setManualDemoFilename(event.target.value);
+                      }}
                       placeholder="Archivo demo (.dm_68)"
                       className="h-8 text-xs"
                     />
@@ -286,9 +351,27 @@ function MatchDetailsDialog({ match, open, onOpenChange }: { match: MatchStats |
                   </div>
                   {adminEnabled && (
                     <div className="p-2 border-t border-border bg-muted/30 space-y-2">
+                      <input
+                        ref={screenshotFileInputRef}
+                        type="file"
+                        className="hidden"
+                        accept="image/*,.tga"
+                        onChange={(event) => handleLocalFilePick("screenshot", event.target.files?.[0] ?? null)}
+                      />
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        className="w-full"
+                        onClick={() => screenshotFileInputRef.current?.click()}
+                      >
+                        Buscar captura en la PC
+                      </Button>
                       <Input
                         value={manualScreenshotFilename}
-                        onChange={(event) => setManualScreenshotFilename(event.target.value)}
+                        onChange={(event) => {
+                          setManualScreenshotFile(null);
+                          setManualScreenshotFilename(event.target.value);
+                        }}
                         placeholder="Archivo screenshot (.jpg/.png)"
                         className="h-8 text-xs"
                       />
@@ -311,9 +394,27 @@ function MatchDetailsDialog({ match, open, onOpenChange }: { match: MatchStats |
                     <p className="text-sm text-muted-foreground">No hay capturas para este mapa</p>
                     {adminEnabled && (
                       <>
+                        <input
+                          ref={screenshotFileInputRef}
+                          type="file"
+                          className="hidden"
+                          accept="image/*,.tga"
+                          onChange={(event) => handleLocalFilePick("screenshot", event.target.files?.[0] ?? null)}
+                        />
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          className="w-full"
+                          onClick={() => screenshotFileInputRef.current?.click()}
+                        >
+                          Buscar captura en la PC
+                        </Button>
                         <Input
                           value={manualScreenshotFilename}
-                          onChange={(event) => setManualScreenshotFilename(event.target.value)}
+                          onChange={(event) => {
+                            setManualScreenshotFile(null);
+                            setManualScreenshotFilename(event.target.value);
+                          }}
                           placeholder="Archivo screenshot (.jpg/.png)"
                           className="h-8 text-xs"
                         />
