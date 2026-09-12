@@ -1,11 +1,15 @@
 import type { MatchStats, PlayerStats, PlayerRanking, RankingFilters } from '../shared/stats-schema';
 import { getAllMatches, getMatchesInDateRange } from './stats-parser';
+import { and, eq, gte, lte, sql } from "drizzle-orm";
+import { db } from "./db";
+import { statsMatches, statsPlayers } from "../shared/schema";
 import {
-  autoSyncStatsFromXmlToDb,
   getMatchesFromStatsDb,
+  getServerStatsFromDb,
   getStatsMatchesCount,
   isMissingStatsTablesError,
   syncMatchesToStatsDb,
+  triggerStatsAutoSyncInBackground,
 } from './match-stats-db-service';
 
 let initialSyncPromise: Promise<void> | null = null;
@@ -36,16 +40,19 @@ async function ensureStatsSeededInDb() {
 async function getMatchesForStats(filters: Partial<RankingFilters> = {}): Promise<MatchStats[]> {
   try {
     await ensureStatsSeededInDb();
-    await autoSyncStatsFromXmlToDb();
     const startDate = filters.startDate ? new Date(filters.startDate) : undefined;
     const endDate = filters.endDate ? new Date(filters.endDate) : undefined;
 
-    return await getMatchesFromStatsDb({
+    let matches = await getMatchesFromStatsDb({
       startDate,
       endDate,
       map: filters.map,
       gameType: filters.gameType,
     });
+
+    triggerStatsAutoSyncInBackground();
+
+    return matches;
   } catch (error) {
     if (!isMissingStatsTablesError(error)) {
       console.error("Error loading stats from DB. Using XML fallback:", error);
@@ -78,10 +85,131 @@ async function getMatchesForStats(filters: Partial<RankingFilters> = {}): Promis
   }
 }
 
+type RankingAggRow = {
+  name: string;
+  totalScore: number | string;
+  totalKills: number | string;
+  totalDeaths: number | string;
+  totalMatches: number | string;
+  totalDamageGiven: number | string;
+  totalDamageTaken: number | string;
+  captures: number | string;
+  defenses: number | string;
+  returns: number | string;
+  gameTypes: string[] | null;
+};
+
+async function calculateGlobalRankingFromDb(filters: Partial<RankingFilters> = {}): Promise<PlayerRanking[]> {
+  const whereClauses = [];
+  if (filters.startDate) {
+    whereClauses.push(gte(statsMatches.playedAt, new Date(filters.startDate)));
+  }
+  if (filters.endDate) {
+    whereClauses.push(lte(statsMatches.playedAt, new Date(filters.endDate)));
+  }
+  if (filters.map) {
+    whereClauses.push(eq(statsMatches.map, filters.map));
+  }
+  if (filters.gameType) {
+    whereClauses.push(eq(statsMatches.type, filters.gameType));
+  }
+
+  const whereCondition =
+    whereClauses.length > 1
+      ? and(...whereClauses)
+      : whereClauses.length === 1
+        ? whereClauses[0]
+        : undefined;
+
+  const rows = await db
+    .select({
+      name: statsPlayers.name,
+      totalScore: sql<number>`coalesce(sum(${statsPlayers.score}), 0)`,
+      totalKills: sql<number>`coalesce(sum(${statsPlayers.kills}), 0)`,
+      totalDeaths: sql<number>`coalesce(sum(${statsPlayers.deaths}), 0)`,
+      totalMatches: sql<number>`count(*)`,
+      totalDamageGiven: sql<number>`coalesce(sum(${statsPlayers.damageGiven}), 0)`,
+      totalDamageTaken: sql<number>`coalesce(sum(${statsPlayers.damageTaken}), 0)`,
+      captures: sql<number>`coalesce(sum(coalesce(${statsPlayers.ctfCaptures}, 0)), 0)`,
+      defenses: sql<number>`coalesce(sum(coalesce(${statsPlayers.ctfDefense}, 0)), 0)`,
+      returns: sql<number>`coalesce(sum(coalesce(${statsPlayers.ctfReturns}, 0)), 0)`,
+      gameTypes: sql<string[]>`array_remove(array_agg(distinct ${statsMatches.type}), null)`,
+    })
+    .from(statsPlayers)
+    .innerJoin(statsMatches, eq(statsPlayers.matchId, statsMatches.matchId))
+    .where(whereCondition)
+    .groupBy(statsPlayers.name);
+
+  const minMatches = filters.minMatches || 1;
+  const rankings: PlayerRanking[] = (rows as RankingAggRow[])
+    .map((row) => {
+      const totalScore = Number(row.totalScore) || 0;
+      const totalKills = Number(row.totalKills) || 0;
+      const totalDeaths = Number(row.totalDeaths) || 0;
+      const totalMatches = Number(row.totalMatches) || 0;
+      const totalDamageGiven = Number(row.totalDamageGiven) || 0;
+      const totalDamageTaken = Number(row.totalDamageTaken) || 0;
+      const captures = Number(row.captures) || 0;
+      const defenses = Number(row.defenses) || 0;
+      const returns = Number(row.returns) || 0;
+
+      return {
+        rank: 0,
+        name: row.name,
+        totalScore,
+        totalKills,
+        totalDeaths,
+        totalMatches,
+        kdRatio: totalDeaths > 0 ? totalKills / totalDeaths : totalKills,
+        avgScore: totalMatches > 0 ? totalScore / totalMatches : 0,
+        totalDamageGiven,
+        totalDamageTaken,
+        captures,
+        defenses,
+        returns,
+        gameTypes: row.gameTypes || [],
+      };
+    })
+    .filter((row) => row.totalMatches >= minMatches);
+
+  const sortBy = filters.sortBy || 'score';
+  rankings.sort((a, b) => {
+    switch (sortBy) {
+      case 'kills':
+        return b.totalKills - a.totalKills;
+      case 'kdRatio':
+        return b.kdRatio - a.kdRatio;
+      case 'captures':
+        return (b.captures || 0) - (a.captures || 0);
+      case 'defenses':
+        return (b.defenses || 0) - (a.defenses || 0);
+      case 'score':
+      default:
+        return b.totalScore - a.totalScore;
+    }
+  });
+
+  rankings.forEach((ranking, index) => {
+    ranking.rank = index + 1;
+  });
+
+  return rankings;
+}
+
 /**
  * Calcula el ranking global de jugadores basado en los filtros
  */
 export async function calculateGlobalRanking(filters: Partial<RankingFilters> = {}): Promise<PlayerRanking[]> {
+  try {
+    await ensureStatsSeededInDb();
+    triggerStatsAutoSyncInBackground();
+    return await calculateGlobalRankingFromDb(filters);
+  } catch (error) {
+    if (!isMissingStatsTablesError(error)) {
+      console.error("Error calculating DB ranking, using fallback in-memory:", error);
+    }
+  }
+
   const matches = await getMatchesForStats(filters);
   
   // Agregar estadísticas por jugador
@@ -237,8 +365,24 @@ export function getMatchRanking(match: MatchStats): PlayerRanking[] {
  * Obtiene estadísticas generales del servidor
  */
 export async function getServerStats() {
+  // Camino rápido: agregación directa en SQL contra la DB. Con ~25000
+  // partidas (antes de aislar los homepaths eran ~1000), armar esto trayendo
+  // cada partida completa con jugadores/armas/items (el camino de abajo)
+  // tardaba decenas de segundos -- por eso las tarjetas de stats quedaban
+  // en loading. Si la DB no tiene las tablas todavía, cae al camino viejo.
+  try {
+    const aggregate = await getServerStatsFromDb();
+    if (aggregate.totalMatches > 0) {
+      return aggregate;
+    }
+  } catch (error) {
+    if (!isMissingStatsTablesError(error)) {
+      console.error("Error calculando stats agregadas desde la DB, usando fallback:", error);
+    }
+  }
+
   const matches = await getMatchesForStats();
-  
+
   const playerNames = new Set<string>();
   let totalKills = 0;
   let totalDeaths = 0;
@@ -297,3 +441,4 @@ export async function getTopPlayers(limit: number = 10) {
       .slice(0, limit),
   };
 }
+

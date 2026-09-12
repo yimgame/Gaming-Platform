@@ -488,8 +488,11 @@ export default function AdminPage() {
           playerCount: game.playerCount,
           tags: game.tags,
           features: game.features,
+          downloads: game.downloads,
           paths: game.paths,
           supportsQuakeStats: game.supportsQuakeStats,
+          supportsCs16Status: game.supportsCs16Status,
+          supportsMinecraftStatus: game.supportsMinecraftStatus,
         }),
       });
 
@@ -631,7 +634,16 @@ export default function AdminPage() {
       });
 
       if (!response.ok) {
-        throw new Error("No se pudo guardar el levelshot");
+        let detail = "No se pudo guardar el levelshot";
+        try {
+          const payload = await parseJsonResponse(response, detail);
+          if (payload?.error) {
+            detail = String(payload.error);
+          }
+        } catch {
+          // usar detalle por defecto
+        }
+        throw new Error(detail);
       }
 
       return parseJsonResponse(response, "No se pudo parsear la respuesta de levelshot");
@@ -644,6 +656,10 @@ export default function AdminPage() {
         levelshotFileInputRef.current.value = "";
       }
       await queryClient.invalidateQueries({ queryKey: ["admin-levelshots", activeToken] });
+      window.alert("Levelshot guardado correctamente");
+    },
+    onError: (error) => {
+      window.alert(error instanceof Error ? error.message : "Error guardando levelshot");
     },
   });
 
@@ -847,6 +863,25 @@ export default function AdminPage() {
   const parseList = (value: string) => value.split("\n").map((item) => item.trim()).filter(Boolean);
   const parseTags = (value: string) => value.split(",").map((item) => item.trim()).filter(Boolean);
   const parseLines = (value: string) => value.split("\n");
+
+  // Descargas: una por línea, formato "Label | URL | Descripción (opcional)".
+  // Se guardan como GameConfig["downloads"] y se muestran como botones en la
+  // ficha del juego (pestaña Información).
+  const parseDownloads = (value: string): NonNullable<GameConfig["downloads"]> =>
+    value
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const [label, url, description] = line.split("|").map((part) => part.trim());
+        return { label: label || url || "Descarga", url: url || "", description: description || undefined };
+      })
+      .filter((dl) => dl.url);
+
+  const formatDownloads = (downloads: GameConfig["downloads"]) =>
+    (downloads || [])
+      .map((dl) => [dl.label, dl.url, dl.description].filter((part) => part && part.length > 0).join(" | "))
+      .join("\n");
   const updateSiteDraft = (patch: Partial<SiteSettingsData>) => {
     setSiteDraft((current) => ({
       ...current,
@@ -1372,6 +1407,17 @@ export default function AdminPage() {
                                 value={draft.features.join("\n")}
                                 onChange={(e) => updateDraft(game.id, { features: parseList(e.target.value) })}
                                 className="w-full min-h-24 rounded-md border border-input bg-background px-3 py-2 text-xs"
+                              />
+                            </div>
+                            <div className="lg:col-span-2">
+                              <p className="text-xs text-muted-foreground mb-1">
+                                Descargas (una por línea: Nombre | URL | Descripción opcional)
+                              </p>
+                              <textarea
+                                value={formatDownloads(draft.downloads)}
+                                onChange={(e) => updateDraft(game.id, { downloads: parseDownloads(e.target.value) })}
+                                placeholder={"ioquake3 (motor recomendado) | https://ioquake3.org/get-it/ | Motor moderno y gratuito"}
+                                className="w-full min-h-20 rounded-md border border-input bg-background px-3 py-2 text-xs font-mono"
                               />
                             </div>
                             <div>
@@ -2040,3 +2086,4 @@ export default function AdminPage() {
     </div>
   );
 }
+

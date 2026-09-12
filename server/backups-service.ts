@@ -3,6 +3,7 @@ import path from "node:path";
 import os from "node:os";
 import { spawn } from "node:child_process";
 import crypto from "node:crypto";
+import { resolveDatabaseUrl } from "./database-url";
 
 export interface BackupSettings {
   enabled: boolean;
@@ -89,10 +90,92 @@ const runCommand = (
   });
 };
 
+const runCommandCaptureStdoutToFile = (
+  command: string,
+  args: string[],
+  outputPath: string,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv } = {},
+): Promise<void> => {
+  return new Promise((resolve, reject) => {
+    const outputStream = fs.createWriteStream(outputPath, { encoding: "utf-8" });
+    const child = spawn(command, args, {
+      cwd: options.cwd,
+      env: options.env,
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    });
+
+    let stderr = "";
+
+    child.stdout.pipe(outputStream);
+    child.stderr.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
+
+    child.on("error", (error) => {
+      outputStream.destroy();
+      reject(error);
+    });
+
+    child.on("close", (code) => {
+      outputStream.end();
+      if (code === 0) {
+        resolve();
+        return;
+      }
+
+      reject(new Error(stderr || `${command} exited with code ${code}`));
+    });
+  });
+};
+
+const runCommandWithStdinFromFile = (
+  command: string,
+  args: string[],
+  inputPath: string,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv } = {},
+): Promise<void> => {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd: options.cwd,
+      env: options.env,
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
+    });
+
+    let stderr = "";
+    const inputStream = fs.createReadStream(inputPath);
+    inputStream.pipe(child.stdin);
+
+    child.stderr.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
+
+    child.on("error", (error) => {
+      inputStream.destroy();
+      reject(error);
+    });
+
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+
+      reject(new Error(stderr || `${command} exited with code ${code}`));
+    });
+  });
+};
+
 const ensureDirs = async () => {
   await fs.promises.mkdir(DATA_DIR, { recursive: true });
   await fs.promises.mkdir(BACKUPS_DIR, { recursive: true });
   await fs.promises.mkdir(BACKUPS_MANUAL_DIR, { recursive: true });
+};
+
+const copyIfExists = async (source: string, destination: string) => {
+  if (!fs.existsSync(source)) return;
+  await fs.promises.cp(source, destination, { recursive: true, force: true });
 };
 
 const loadSettings = async (): Promise<BackupSettings> => {
@@ -363,32 +446,76 @@ const resolveBackupPath = async (scope: "default" | "manual", filename: string):
   return fullPath;
 };
 
-const createDbDump = async (outputPath: string, warnings: string[]) => {
-  const databaseUrl = process.env.DATABASE_URL;
-  if (!databaseUrl) {
-    warnings.push("DATABASE_URL no definida, backup sin dump SQL.");
-    return;
+const getResolvedDatabaseInfo = () => {
+  const resolved = resolveDatabaseUrl(process.env.DATABASE_URL);
+  const parsed = new URL(resolved.url);
+  const database = parsed.pathname.replace(/^\//, "");
+
+  if (!database) {
+    throw new Error("DATABASE_URL sin nombre de base de datos");
   }
 
+  return {
+    resolvedUrl: resolved.url,
+    username: decodeURIComponent(parsed.username || "postgres"),
+    password: decodeURIComponent(parsed.password || ""),
+    database,
+  };
+};
+
+const getDockerDbContainerName = () => process.env.DB_DOCKER_CONTAINER || "yim-gaming-db";
+
+const createDbDump = async (outputPath: string, warnings: string[]) => {
+  const { resolvedUrl, username, password, database } = getResolvedDatabaseInfo();
+
   try {
-    await runCommand("pg_dump", ["--dbname", databaseUrl, "--no-owner", "--no-privileges", "--file", outputPath]);
+    await runCommand("pg_dump", ["--dbname", resolvedUrl, "--no-owner", "--no-privileges", "--file", outputPath]);
+    return;
   } catch (error) {
-    warnings.push(`No se pudo ejecutar pg_dump (${error instanceof Error ? error.message : String(error)}).`);
+    warnings.push(`pg_dump local no disponible (${error instanceof Error ? error.message : String(error)}). Intentando via Docker...`);
   }
+
+  const containerName = getDockerDbContainerName();
+  const dockerArgs = [
+    "exec",
+    ...(password ? ["-e", `PGPASSWORD=${password}`] : []),
+    containerName,
+    "pg_dump",
+    "-U",
+    username,
+    "-d",
+    database,
+    "--no-owner",
+    "--no-privileges",
+  ];
+
+  await runCommandCaptureStdoutToFile("docker", dockerArgs, outputPath);
 };
 
 const restoreDbDump = async (sqlPath: string, warnings: string[]) => {
-  const databaseUrl = process.env.DATABASE_URL;
-  if (!databaseUrl) {
-    warnings.push("DATABASE_URL no definida, restore sin import SQL.");
-    return;
-  }
+  const { resolvedUrl, username, password, database } = getResolvedDatabaseInfo();
 
   try {
-    await runCommand("psql", ["--dbname", databaseUrl, "-f", sqlPath]);
+    await runCommand("psql", ["--dbname", resolvedUrl, "-f", sqlPath]);
+    return;
   } catch (error) {
-    warnings.push(`No se pudo restaurar SQL con psql (${error instanceof Error ? error.message : String(error)}).`);
+    warnings.push(`psql local no disponible (${error instanceof Error ? error.message : String(error)}). Intentando restore via Docker...`);
   }
+
+  const containerName = getDockerDbContainerName();
+  const dockerArgs = [
+    "exec",
+    "-i",
+    ...(password ? ["-e", `PGPASSWORD=${password}`] : []),
+    containerName,
+    "psql",
+    "-U",
+    username,
+    "-d",
+    database,
+  ];
+
+  await runCommandWithStdinFromFile("docker", dockerArgs, sqlPath);
 };
 
 export async function getBackupStatus() {
@@ -475,7 +602,19 @@ export async function createBackupNow(): Promise<BackupRunResult> {
       await fs.promises.copyFile(envPath, path.join(stageRoot, ".env"));
     }
 
-    await createDbDump(path.join(stageRoot, "database.sql"), warnings);
+    await copyIfExists(path.join(process.cwd(), "server"), path.join(stageRoot, "server"));
+    await copyIfExists(path.join(process.cwd(), "shared"), path.join(stageRoot, "shared"));
+    await copyIfExists(path.join(process.cwd(), "package.json"), path.join(stageRoot, "package.json"));
+    await copyIfExists(path.join(process.cwd(), "tsconfig.json"), path.join(stageRoot, "tsconfig.json"));
+    await copyIfExists(path.join(process.cwd(), "drizzle.config.ts"), path.join(stageRoot, "drizzle.config.ts"));
+
+    const sqlPath = path.join(stageRoot, "database.sql");
+    await createDbDump(sqlPath, warnings);
+
+    const sqlStat = await fs.promises.stat(sqlPath).catch(() => null);
+    if (!sqlStat || !sqlStat.isFile() || sqlStat.size <= 0) {
+      throw new Error("No se pudo generar database.sql para el backup.");
+    }
 
     const manifest = await createBackupManifest(stageRoot);
     await fs.promises.writeFile(
@@ -576,6 +715,20 @@ export async function restoreBackupFromScope(
       await fs.promises.cp(backupData, path.join(process.cwd(), "data"), { recursive: true, force: true });
     } else {
       warnings.push("El backup no contiene carpeta data.");
+    }
+
+    const backupServer = path.join(extractedRoot, "server");
+    if (fs.existsSync(backupServer)) {
+      await fs.promises.cp(backupServer, path.join(process.cwd(), "server"), { recursive: true, force: true });
+    } else {
+      warnings.push("El backup no contiene carpeta server.");
+    }
+
+    const backupShared = path.join(extractedRoot, "shared");
+    if (fs.existsSync(backupShared)) {
+      await fs.promises.cp(backupShared, path.join(process.cwd(), "shared"), { recursive: true, force: true });
+    } else {
+      warnings.push("El backup no contiene carpeta shared.");
     }
 
     const sqlDump = path.join(extractedRoot, "database.sql");

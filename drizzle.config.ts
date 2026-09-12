@@ -1,7 +1,10 @@
 import { defineConfig } from "drizzle-kit";
+import { resolveDatabaseUrl } from "./server/database-url";
 
-if (!process.env.DATABASE_URL) {
-  throw new Error("DATABASE_URL, ensure the database is provisioned");
+const resolvedDb = resolveDatabaseUrl(process.env.DATABASE_URL);
+
+if (resolvedDb.usedHostFallback) {
+  console.warn("drizzle-kit: DATABASE_URL host 'db' detected outside Docker. Using localhost fallback.");
 }
 
 export default defineConfig({
@@ -9,6 +12,6 @@ export default defineConfig({
   schema: "./shared/schema.ts",
   dialect: "postgresql",
   dbCredentials: {
-    url: process.env.DATABASE_URL,
+    url: resolvedDb.url,
   },
 });

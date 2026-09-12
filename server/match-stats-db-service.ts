@@ -10,9 +10,38 @@ import {
 import { db } from "./db";
 import { getAllMatches } from "./stats-parser";
 
-const DEFAULT_AUTO_SYNC_INTERVAL_MS = 10000;
+// Con ~1000 partidas (antes de aislar los homepaths) un rescan completo cada
+// 10s era barato. Ahora hay ~19000 XML repartidos en 7-8 carpetas, así que
+// cada rescan completo tarda minutos -- subimos el intervalo mínimo para no
+// quedar re-escaneando todo el disco casi sin parar en cada visita a la página.
+const DEFAULT_AUTO_SYNC_INTERVAL_MS = 5 * 60 * 1000;
 let lastAutoSyncAt = 0;
 let autoSyncInFlight: Promise<{ imported: number; skipped: boolean }> | null = null;
+
+// Ahora que hay miles de partidas en stats_matches (antes eran ~1000, hoy son
+// ~19000 al sumar las 6 instancias aisladas), un solo WHERE ... IN (...) con
+// TODOS los ids revienta drizzle-orm con "Maximum call stack size exceeded"
+// al armar la query (mergeQueries la arma recursivamente, un frame por id).
+// Partimos los ids en tandas chicas y pegamos los resultados acá en JS.
+const ID_BATCH_SIZE = 1000;
+
+async function selectByIdsInBatches<Row>(
+  ids: string[],
+  queryFn: (batch: string[]) => Promise<Row[]>,
+): Promise<Row[]> {
+  if (ids.length === 0) return [];
+
+  const chunks: string[][] = [];
+  for (let i = 0; i < ids.length; i += ID_BATCH_SIZE) {
+    chunks.push(ids.slice(i, i + ID_BATCH_SIZE));
+  }
+
+  // Los lotes van todos en paralelo (son SELECTs independientes por id) --
+  // con miles de partidas, esperar cada lote uno por uno antes de pedir el
+  // siguiente sumaba varios segundos de solo latencia de red contra Postgres.
+  const results = await Promise.all(chunks.map((batch) => queryFn(batch)));
+  return results.flat();
+}
 
 function parseMatchDatetime(matchDatetime: string): Date {
   const parts = matchDatetime.split(" ");
@@ -56,49 +85,49 @@ const getPgErrorCode = (error: unknown): string | undefined => {
 
 export const isMissingStatsTablesError = (error: unknown) => getPgErrorCode(error) === "42P01";
 
-async function insertPlayerChildren(playerId: string, player: PlayerStats) {
-  if (player.weapons.length > 0) {
-    await db.insert(statsPlayerWeapons).values(
-      player.weapons.map((weapon, index) => ({
-        playerId,
-        weaponIndex: index,
-        name: weapon.name,
-        hits: weapon.hits,
-        shots: weapon.shots,
-        kills: weapon.kills,
-        accuracy: weapon.accuracy ?? null,
-      })),
-    );
-  }
-
-  const itemRows = [
-    ...player.items.map((item, index) => ({
-      playerId,
-      category: "item",
-      itemIndex: index,
-      name: item.name,
-      pickups: item.pickups,
-      time: item.time ?? null,
-    })),
-    ...player.powerups.map((item, index) => ({
-      playerId,
-      category: "powerup",
-      itemIndex: index,
-      name: item.name,
-      pickups: item.pickups,
-      time: item.time ?? null,
-    })),
-  ];
-
-  if (itemRows.length > 0) {
-    await db.insert(statsPlayerItems).values(itemRows);
-  }
-}
-
 export async function upsertMatchToStatsDb(match: MatchStats, sourcePath?: string): Promise<void> {
   const playedAt = parseMatchDatetime(match.datetime);
 
   await db.transaction(async (tx) => {
+    const insertPlayerChildren = async (playerId: string, player: PlayerStats) => {
+      if (player.weapons.length > 0) {
+        await tx.insert(statsPlayerWeapons).values(
+          player.weapons.map((weapon, index) => ({
+            playerId,
+            weaponIndex: index,
+            name: weapon.name,
+            hits: weapon.hits,
+            shots: weapon.shots,
+            kills: weapon.kills,
+            accuracy: weapon.accuracy ?? null,
+          })),
+        );
+      }
+
+      const itemRows = [
+        ...player.items.map((item, index) => ({
+          playerId,
+          category: "item",
+          itemIndex: index,
+          name: item.name,
+          pickups: item.pickups,
+          time: item.time ?? null,
+        })),
+        ...player.powerups.map((item, index) => ({
+          playerId,
+          category: "powerup",
+          itemIndex: index,
+          name: item.name,
+          pickups: item.pickups,
+          time: item.time ?? null,
+        })),
+      ];
+
+      if (itemRows.length > 0) {
+        await tx.insert(statsPlayerItems).values(itemRows);
+      }
+    };
+
     await tx.delete(statsMatches).where(eq(statsMatches.matchId, match.id));
 
     await tx.insert(statsMatches).values({
@@ -232,12 +261,27 @@ export async function autoSyncStatsFromXmlToDb(
   }
 }
 
+export function triggerStatsAutoSyncInBackground(minIntervalMs: number = DEFAULT_AUTO_SYNC_INTERVAL_MS) {
+  void autoSyncStatsFromXmlToDb(minIntervalMs).catch((error) => {
+    console.warn("Stats autosync background error:", error);
+  });
+}
+
 interface MatchQueryFilters {
   startDate?: Date;
   endDate?: Date;
   map?: string;
   gameType?: string;
+  // Con ~19000 partidas en la DB (antes de aislar los homepaths eran ~1000),
+  // traer TODAS con jugadores/armas/items completos de una sola vez arma un
+  // JSON de más de 100MB -- inmanejable para el navegador. La pestaña
+  // "Partidas" de la web solo necesita las más recientes, así que sin
+  // `limit` explícito acotamos a un tope por defecto.
+  limit?: number;
 }
+
+const DEFAULT_MATCHES_LIMIT = 200;
+const MAX_MATCHES_LIMIT = 1000;
 
 async function getMatchesCore(filters: MatchQueryFilters = {}): Promise<MatchStats[]> {
   const whereClauses = [];
@@ -265,11 +309,14 @@ async function getMatchesCore(filters: MatchQueryFilters = {}): Promise<MatchSta
         ? whereClauses[0]
         : undefined;
 
+  const effectiveLimit = Math.min(filters.limit ?? DEFAULT_MATCHES_LIMIT, MAX_MATCHES_LIMIT);
+
   const matchRows = await db
     .select()
     .from(statsMatches)
     .where(whereCondition)
-    .orderBy(desc(statsMatches.playedAt));
+    .orderBy(desc(statsMatches.playedAt))
+    .limit(effectiveLimit);
 
   if (matchRows.length === 0) {
     return [];
@@ -278,31 +325,39 @@ async function getMatchesCore(filters: MatchQueryFilters = {}): Promise<MatchSta
   const matchIds = matchRows.map((row) => row.matchId);
 
   const [teamRows, playerRows] = await Promise.all([
-    db
-      .select()
-      .from(statsTeams)
-      .where(inArray(statsTeams.matchId, matchIds))
-      .orderBy(asc(statsTeams.matchId), asc(statsTeams.teamIndex)),
-    db
-      .select()
-      .from(statsPlayers)
-      .where(inArray(statsPlayers.matchId, matchIds))
-      .orderBy(asc(statsPlayers.matchId), asc(statsPlayers.playerIndex)),
+    selectByIdsInBatches(matchIds, (batch) =>
+      db
+        .select()
+        .from(statsTeams)
+        .where(inArray(statsTeams.matchId, batch))
+        .orderBy(asc(statsTeams.matchId), asc(statsTeams.teamIndex)),
+    ),
+    selectByIdsInBatches(matchIds, (batch) =>
+      db
+        .select()
+        .from(statsPlayers)
+        .where(inArray(statsPlayers.matchId, batch))
+        .orderBy(asc(statsPlayers.matchId), asc(statsPlayers.playerIndex)),
+    ),
   ]);
 
   const playerIds = playerRows.map((row) => row.id);
   const [weaponRows, itemRows] = playerIds.length
     ? await Promise.all([
-        db
-          .select()
-          .from(statsPlayerWeapons)
-          .where(inArray(statsPlayerWeapons.playerId, playerIds))
-          .orderBy(asc(statsPlayerWeapons.playerId), asc(statsPlayerWeapons.weaponIndex)),
-        db
-          .select()
-          .from(statsPlayerItems)
-          .where(inArray(statsPlayerItems.playerId, playerIds))
-          .orderBy(asc(statsPlayerItems.playerId), asc(statsPlayerItems.itemIndex)),
+        selectByIdsInBatches(playerIds, (batch) =>
+          db
+            .select()
+            .from(statsPlayerWeapons)
+            .where(inArray(statsPlayerWeapons.playerId, batch))
+            .orderBy(asc(statsPlayerWeapons.playerId), asc(statsPlayerWeapons.weaponIndex)),
+        ),
+        selectByIdsInBatches(playerIds, (batch) =>
+          db
+            .select()
+            .from(statsPlayerItems)
+            .where(inArray(statsPlayerItems.playerId, batch))
+            .orderBy(asc(statsPlayerItems.playerId), asc(statsPlayerItems.itemIndex)),
+        ),
       ])
     : [[], []];
 
@@ -437,3 +492,55 @@ export async function getStatsMatchesCount(): Promise<number> {
 
   return row?.total ?? 0;
 }
+
+export interface ServerStatsAggregate {
+  totalMatches: number;
+  totalPlayers: number;
+  totalKills: number;
+  totalDeaths: number;
+  totalDamage: number;
+  maps: { map: string; count: number }[];
+  gameTypes: { type: string; count: number }[];
+}
+
+/**
+ * Versión "liviana" de getServerStats: en vez de traer TODAS las partidas
+ * con sus jugadores/armas/items completos (como hace getMatchesForStats,
+ * que a ~25000 partidas tarda decenas de segundos solo para sumar
+ * contadores), calcula los totales con agregación en SQL. No usa
+ * weapons/items para nada acá, así que ni los pide.
+ */
+export async function getServerStatsFromDb(): Promise<ServerStatsAggregate> {
+  const [[matchAgg], [playerAgg], mapRows, typeRows] = await Promise.all([
+    db.select({ totalMatches: sql<number>`count(*)::int` }).from(statsMatches),
+    db
+      .select({
+        totalPlayers: sql<number>`count(distinct ${statsPlayers.name})::int`,
+        totalKills: sql<number>`coalesce(sum(${statsPlayers.kills}), 0)::bigint`,
+        totalDeaths: sql<number>`coalesce(sum(${statsPlayers.deaths}), 0)::bigint`,
+        totalDamage: sql<number>`coalesce(sum(${statsPlayers.damageGiven}), 0)::bigint`,
+      })
+      .from(statsPlayers),
+    db
+      .select({ map: statsMatches.map, count: sql<number>`count(*)::int` })
+      .from(statsMatches)
+      .groupBy(statsMatches.map)
+      .orderBy(sql`count(*) desc`),
+    db
+      .select({ type: statsMatches.type, count: sql<number>`count(*)::int` })
+      .from(statsMatches)
+      .groupBy(statsMatches.type)
+      .orderBy(sql`count(*) desc`),
+  ]);
+
+  return {
+    totalMatches: matchAgg?.totalMatches ?? 0,
+    totalPlayers: playerAgg?.totalPlayers ?? 0,
+    totalKills: Number(playerAgg?.totalKills ?? 0),
+    totalDeaths: Number(playerAgg?.totalDeaths ?? 0),
+    totalDamage: Number(playerAgg?.totalDamage ?? 0),
+    maps: mapRows,
+    gameTypes: typeRows,
+  };
+}
+

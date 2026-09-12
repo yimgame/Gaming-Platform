@@ -2,7 +2,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Gamepad2, Globe, Users } from "lucide-react";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 
 interface GameCardProps {
   id: string;
@@ -15,33 +15,34 @@ interface GameCardProps {
   playerCount?: string;
 }
 
-export default function GameCard({ 
+export default function GameCard({
   id,
-  title, 
-  description, 
-  tags, 
-  image, 
+  title,
+  description,
+  tags,
+  image,
   connectUrl,
   status = "online",
   playerCount = "0/32"
 }: GameCardProps) {
   const isOnline = status === "online";
-  
-  
+  const [, navigate] = useLocation();
+
   return (
-    <Card 
-      className="group relative overflow-hidden bg-card/50 backdrop-blur-sm border-2 border-primary/30 hover:border-primary/60 transition-all duration-300 hover:shadow-2xl hover:-translate-y-2"
+    <Card
+      onClick={() => navigate(`/games/${id}`)}
+      className="group relative overflow-hidden bg-card/50 backdrop-blur-sm border-2 border-primary/30 hover:border-primary/60 transition-all duration-300 hover:shadow-2xl hover:-translate-y-2 cursor-pointer"
       style={{
         filter: "drop-shadow(0 0 20px rgba(0, 240, 255, 0.1))",
       }}
     >
       <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-secondary/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-      
+
       <div className="relative aspect-video overflow-hidden bg-muted">
         {/* Placeholder gradient for game image since we don't have game screenshots yet */}
         <div className="absolute inset-0 bg-gradient-to-t from-background to-transparent z-10" />
-        <img 
-          src={image} 
+        <img
+          src={image}
           alt={title}
           className="object-cover w-full h-full transition-transform duration-500 group-hover:scale-110"
         />
@@ -78,7 +79,9 @@ export default function GameCard({
             <span>{playerCount} Players</span>
           </div>
 
-          <div className="flex gap-3">
+          {/* stopPropagation en los botones para que no disparen TAMBIÉN la
+              navegación de la tarjeta entera (evita doble-click/anidar <a>) */}
+          <div className="flex gap-3" onClick={(e) => e.stopPropagation()}>
             <Link href={`/games/${id}`}>
               <Button variant="outline" size="sm">
                 <Globe className="w-4 h-4 mr-2" />

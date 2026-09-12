@@ -1,12 +1,11 @@
 [
   {
-    "id": "quake-3-arena",
     "title": "Quake 3",
     "description": "El rey de los arena shooters. Rocket jumps, strafe jumping y torneos mensuales.",
     "longDescription": "El rey de los arena shooters. Rocket jumps, strafe jumping y torneos mensuales.",
     "cardImage": "/quake3-hero.jpg",
     "backgroundImage": "/quake3-hero.jpg",
-    "connectUrl": "yim.servegame.com:27960",
+    "connectUrl": "192.168.0.202:27960",
     "status": "online",
     "playerCount": "0/16",
     "tags": [
@@ -22,12 +21,30 @@
       "Mapas clásicos y custom"
     ],
     "paths": {
-      "basePath": "G:\\Games\\Quake3",
-      "statsPath": "G:\\Games\\Quake3\\cmpa\\stats",
-      "screenshotsPath": "G:\\Games\\Quake3\\cmpa\\screenshots",
-      "demosPath": "G:\\Games\\Quake3\\cmpa\\demos"
+      "basePath": "/mnt/ssd-jellyfin/gamesrv/Quake3",
+      "statsPath": "/mnt/ssd-jellyfin/gamesrv/Quake3/cpma/stats",
+      "screenshotsPath": "/mnt/ssd-jellyfin/gamesrv/Quake3/cpma/screenshots",
+      "demosPath": "/mnt/ssd-jellyfin/gamesrv/Quake3/cpma/demos"
     },
-    "supportsQuakeStats": true
+    "supportsQuakeStats": true,
+    "id": "quake-3-arena",
+    "downloads": [
+      {
+        "label": "Quake 3 Arena (juego base)",
+        "url": "https://archive.org/details/quake-3-arena",
+        "description": "Copia del juego original completo en Internet Archive"
+      },
+      {
+        "label": "ioquake3 (motor recomendado)",
+        "url": "https://ioquake3.org/get-it/",
+        "description": "Motor moderno y gratuito, compatible con nuestros servers"
+      },
+      {
+        "label": "CPMA - ProMode Arena (mod)",
+        "url": "https://playmorepromode.com/downloads",
+        "description": "Mod competitivo que usan nuestros servers"
+      }
+    ]
   },
   {
     "id": "counter-strike-1-6",
@@ -36,7 +53,7 @@
     "longDescription": "Counter-Strike 1.6 es el FPS táctico que definió una generación. Combates intensos 5v5, estrategia de equipo y habilidad individual se combinan en el shooter competitivo más icónico de todos los tiempos.",
     "cardImage": "cs16.jpg",
     "backgroundImage": "https://images.unsplash.com/photo-1542751371-adc38448a05e?q=80&w=2070&auto=format&fit=crop",
-    "connectUrl": "steam://connect/yim.servegame.com:27015",
+    "connectUrl": "steam://connect/192.168.0.202:27015",
     "status": "online",
     "playerCount": "12/32",
     "tags": [
@@ -55,7 +72,15 @@
     "paths": {
       "basePath": "G:\\Games\\Counter-Strike 1.6\\cstrike"
     },
-    "supportsQuakeStats": false
+    "supportsQuakeStats": false,
+    "supportsCs16Status": true,
+    "downloads": [
+      {
+        "label": "NextClient (cliente recomendado)",
+        "url": "https://github.com/CS-NextClient/NextClient/releases",
+        "description": "Cliente moderno para CS 1.6, compatible con nuestros servers"
+      }
+    ]
   },
   {
     "id": "counter-strike-2",
@@ -92,7 +117,7 @@
     "longDescription": "Explora un mundo infinito de posibilidades en nuestro servidor Survival. Construye, explora, comercia y sobrevive junto a una comunidad activa. Con plugins de protección y economía para una experiencia equilibrada.",
     "cardImage": "minecraft.jpg",
     "backgroundImage": "https://images.unsplash.com/photo-1607525388365-18ae415b3c54?q=80&w=2070&auto=format&fit=crop",
-    "connectUrl": "minecraft://connect/yim.servegame.com",
+    "connectUrl": "192.168.0.202:25565",
     "status": "online",
     "playerCount": "25/100",
     "tags": [
@@ -111,7 +136,8 @@
     "paths": {
       "basePath": "G:\\Games\\Minecraft"
     },
-    "supportsQuakeStats": false
+    "supportsQuakeStats": false,
+    "supportsMinecraftStatus": true
   },
   {
     "id": "quake-2",
@@ -148,8 +174,8 @@
     "longDescription": "El origen de todos los arena shooters. QuakeWorld ofrece la física más pura, bunny hopping perfecto y duelos 1v1 intensos que han resistido la prueba del tiempo.",
     "cardImage": "quake1-hero.jpg",
     "backgroundImage": "https://images.unsplash.com/photo-1550745165-9bc0b252726f?q=80&w=2070&auto=format&fit=crop",
-    "connectUrl": "#",
-    "status": "offline",
+    "connectUrl": "https://quake.cherin.com.ar",
+    "status": "online",
     "playerCount": "0/16",
     "tags": [
       "Retro",

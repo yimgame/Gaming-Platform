@@ -49,7 +49,7 @@ Usa `.env.example` como base.
 NODE_ENV=production
 PORT=5001
 DOMAIN=tu-dominio-o-ip
-DATABASE_URL=postgres://postgres:postgres@db:5432/app_db
+DATABASE_URL=postgres://postgres:postgres@localhost:5433/app_db
 CERTBOT_EMAIL=tu-email@gmail.com
 
 # Seguridad admin
@@ -103,6 +103,12 @@ Primer arranque recomendado:
 
 - `init-db.bat`: crea/actualiza tablas en PostgreSQL usando `DATABASE_URL`
 - Por defecto usa `postgres://postgres:postgres@localhost:5433/app_db`
+
+Modo híbrido recomendado (app local + DB Docker):
+
+- Levanta solo PostgreSQL con Docker (por ejemplo `docker compose up -d db`)
+- Corre backend/frontend en tu PC con `start-dev.bat`
+- Si `DATABASE_URL` queda en formato Docker (`@db:5432`) y corres local, el proyecto aplica fallback automático a `localhost:5433`
 
 ### Producción (Docker)
 

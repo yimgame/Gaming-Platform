@@ -2,6 +2,12 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import { SCREENSHOTS_BASE_PATH } from './config';
 
+const isScreenshotMatchDebugEnabled = process.env.DEBUG_SCREENSHOT_MATCH === '1';
+const logScreenshotDebug = (...args: unknown[]) => {
+  if (!isScreenshotMatchDebugEnabled) return;
+  console.log(...args);
+};
+
 export interface Screenshot {
   filename: string;
   path: string;
@@ -197,7 +203,7 @@ export async function getScreenshotsByMatch(
   const windowStart = new Date(matchDate.getTime() - timeWindowMinutes * 60 * 1000);
   const windowEnd = new Date(matchDate.getTime() + timeWindowMinutes * 60 * 1000);
   
-  console.log(`Buscando screenshots correlacionadas:`, {
+  logScreenshotDebug(`Buscando screenshots correlacionadas:`, {
     type: matchType,
     map: matchMap,
     normalizedMap: normalizedMatchMap,
@@ -206,14 +212,14 @@ export async function getScreenshotsByMatch(
     window: `${windowStart.toISOString()} - ${windowEnd.toISOString()}`,
   });
   
-  console.log(`Total screenshots disponibles: ${allScreenshots.length}`);
+  logScreenshotDebug(`Total screenshots disponibles: ${allScreenshots.length}`);
   
   const correlatedScreenshots = allScreenshots.filter(screenshot => {
     if (pinnedSet.has(screenshot.filename.toLowerCase())) return false;
     const parsed = parseScreenshotFilename(screenshot.filename);
     
     if (!parsed) {
-      console.log(`❌ No se pudo parsear: ${screenshot.filename}`);
+      logScreenshotDebug(`❌ No se pudo parsear: ${screenshot.filename}`);
       return false;
     }
     
@@ -224,7 +230,7 @@ export async function getScreenshotsByMatch(
       || normalizedScreenshotType.startsWith(normalizedMatchType)
       || normalizedMatchType.startsWith(normalizedScreenshotType);
     if (!typeMatch) {
-      console.log(`❌ Tipo no coincide: ${screenshot.filename} (screenshot: ${parsed.type}, match: ${matchType})`);
+      logScreenshotDebug(`❌ Tipo no coincide: ${screenshot.filename} (screenshot: ${parsed.type}, match: ${matchType})`);
       return false;
     }
     
@@ -233,7 +239,7 @@ export async function getScreenshotsByMatch(
     const normalizedFilename = normalizeMapName(screenshot.filename);
     const mapMatch = normalizedFilename.includes(normalizedMatchMap);
     if (!mapMatch) {
-      console.log(`❌ Mapa no coincide: ${screenshot.filename} (match: ${matchMap} → ${normalizedMatchMap})`);
+      logScreenshotDebug(`❌ Mapa no coincide: ${screenshot.filename} (match: ${matchMap} → ${normalizedMatchMap})`);
       return false;
     }
     
@@ -245,17 +251,17 @@ export async function getScreenshotsByMatch(
     
     if (timeMatch) {
       const timeDiffSeconds = Math.abs(screenshotTime.getTime() - matchDate.getTime()) / 1000;
-      console.log(`✅ COINCIDENCIA: ${screenshot.filename} (diff: ${timeDiffSeconds.toFixed(0)}s, timestamp: ${screenshotTime.toISOString()})`);
+      logScreenshotDebug(`✅ COINCIDENCIA: ${screenshot.filename} (diff: ${timeDiffSeconds.toFixed(0)}s, timestamp: ${screenshotTime.toISOString()})`);
       return true;
     } else {
       const timeDiffMinutes = Math.abs(screenshotTime.getTime() - matchDate.getTime()) / 60000;
-      console.log(`❌ Fuera de ventana temporal: ${screenshot.filename} (diff: ${timeDiffMinutes.toFixed(2)} min, timestamp: ${screenshotTime.toISOString()})`);
+      logScreenshotDebug(`❌ Fuera de ventana temporal: ${screenshot.filename} (diff: ${timeDiffMinutes.toFixed(2)} min, timestamp: ${screenshotTime.toISOString()})`);
     }
     
     return false;
   });
   
-  console.log(`Capturas encontradas: ${correlatedScreenshots.length}`);
+  logScreenshotDebug(`Capturas encontradas: ${correlatedScreenshots.length}`);
   
   // Ordenar por cercanía a la fecha de la partida (usando timestamp de modificación)
   correlatedScreenshots.sort((a, b) => {
@@ -278,26 +284,19 @@ export async function getScreenshotsByMatch(
   });
 }
 
-/**
- * Busca screenshots simples por nombre de mapa
- * Retorna hasta 3 capturas más recientes que coincidan con el mapa
- */
 export async function getScreenshotsByMapName(mapName: string): Promise<Screenshot[]> {
   const allScreenshots = await getAllScreenshots();
-  
-  // Normalizar nombre del mapa (quitar guiones bajos, guiones, espacios, case-insensitive)
-  const normalizeMapName = (map: string) => {
-    return map.toLowerCase().replace(/[_\s-]/g, '');
-  };
-  
   const normalizedMapName = normalizeMapName(mapName);
-  
-  // Filtrar screenshots que contengan el nombre del mapa normalizado
-  const matchingScreenshots = allScreenshots.filter(screenshot => {
+
+  if (!normalizedMapName) {
+    return [];
+  }
+
+  const matchingScreenshots = allScreenshots.filter((screenshot) => {
     const normalizedFilename = normalizeMapName(screenshot.filename);
     return normalizedFilename.includes(normalizedMapName);
   });
-  
-  // Retornar las 3 más recientes
+
   return matchingScreenshots.slice(0, 3);
 }
+

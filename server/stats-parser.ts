@@ -2,44 +2,60 @@ import { parseStringPromise } from 'xml2js';
 import fs from 'fs/promises';
 import path from 'path';
 import type { MatchStats, PlayerStats, TeamStats, WeaponStats, ItemStats } from '../shared/stats-schema';
-import { STATS_BASE_PATH } from './config';
+import { STATS_BASE_PATH, STATS_SOURCES, type StatsSource } from './config';
 
-function resolveMatchId(xmlPath: string, attrs?: Record<string, string>): string {
+function resolveMatchId(xmlPath: string, basePath: string, sourceTag: string, attrs?: Record<string, string>): string {
   const xmlId = attrs?.id?.toString();
   if (xmlId && xmlId !== '0') {
     return xmlId;
   }
 
-  const relativePath = path.relative(STATS_BASE_PATH, xmlPath);
+  const relativePath = path.relative(basePath, xmlPath);
   const normalizedPath = relativePath && !relativePath.startsWith('..')
     ? relativePath
     : path.basename(xmlPath);
   const withoutExtension = normalizedPath.replace(/\.xml$/i, '');
   const fallback = withoutExtension.replace(/[\\/]/g, '-') || path.basename(xmlPath, path.extname(xmlPath));
 
-  return fallback;
+  // "legacy" es la carpeta compartida de siempre -- miles de partidas ya
+  // están en la DB con el id SIN prefijo (formato viejo, ej. "2026-02-13-...").
+  // No le agregamos prefijo para no duplicarlas: el upsert las va a
+  // encontrar por el mismo id y actualizarlas en vez de crear una fila nueva.
+  if (sourceTag === 'legacy') {
+    return fallback;
+  }
+
+  // Para las fuentes nuevas (una por instancia aislada) sí prefijamos con el
+  // origen, para que dos servers distintos no generen el mismo id si
+  // jugaron una partida justo a la misma hora (CPMA siempre manda id="0",
+  // así que el id real sale de acá).
+  return `${sourceTag}-${fallback}`;
 }
 
 /**
  * Parse un archivo XML de estadísticas de CPMA
  */
-export async function parseMatchXML(xmlPath: string): Promise<MatchStats> {
+export async function parseMatchXML(
+  xmlPath: string,
+  basePath: string = STATS_BASE_PATH,
+  sourceTag: string = 'legacy',
+): Promise<MatchStats> {
   const xmlContent = await fs.readFile(xmlPath, 'utf-8');
   const result = await parseStringPromise(xmlContent);
-  
+
   const match = result.match.$;
-  const matchId = resolveMatchId(xmlPath, match);
+  const matchId = resolveMatchId(xmlPath, basePath, sourceTag, match);
   const isTeamGame = match.isTeamGame === 'true';
-  
+
   let teams: TeamStats[] = [];
   let players: PlayerStats[] = [];
-  
+
   if (isTeamGame && result.match.team) {
     teams = result.match.team.map((team: any) => parseTeam(team));
   } else if (result.match.player) {
     players = result.match.player.map((player: any) => parsePlayer(player));
   }
-  
+
   return {
     id: matchId,
     datetime: match.datetime,
@@ -58,7 +74,7 @@ export async function parseMatchXML(xmlPath: string): Promise<MatchStats> {
 function parseTeam(teamData: any): TeamStats {
   const team = teamData.$;
   const players = teamData.player?.map((player: any) => parsePlayer(player)) || [];
-  
+
   return {
     name: team.name || '',
     score: parseInt(team.score) || 0,
@@ -80,7 +96,7 @@ function parsePlayer(playerData: any): PlayerStats {
     acc[key] = Number.isNaN(parsedValue) ? 0 : parsedValue;
     return acc;
   }, {});
-  
+
   const weapons: WeaponStats[] = player.weapons?.[0]?.weapon?.map((weapon: any) => ({
     name: weapon.$.name,
     hits: parseInt(weapon.$.hits) || 0,
@@ -88,23 +104,23 @@ function parsePlayer(playerData: any): PlayerStats {
     kills: parseInt(weapon.$.kills) || 0,
     accuracy: weapon.$.shots > 0 ? (parseInt(weapon.$.hits) / parseInt(weapon.$.shots)) * 100 : 0,
   })) || [];
-  
+
   const items: ItemStats[] = player.items?.[0]?.item?.map((item: any) => ({
     name: item.$.name,
     pickups: parseInt(item.$.pickups) || 0,
   })) || [];
-  
+
   const powerups: ItemStats[] = player.powerups?.[0]?.item?.map((item: any) => ({
     name: item.$.name,
     pickups: parseInt(item.$.pickups) || 0,
     time: parseInt(item.$.time) || 0,
   })) || [];
-  
+
   const ctfStats = player.CTF?.[0]?.stat?.reduce((acc: any, stat: any) => {
     acc[stat.$.name.toLowerCase()] = parseInt(stat.$.value) || 0;
     return acc;
   }, {});
-  
+
   return {
     name: player.$.name,
     score: parseInt(stats.Score) || 0,
@@ -132,93 +148,114 @@ function parsePlayer(playerData: any): PlayerStats {
 }
 
 /**
- * Obtiene todas las partidas en un rango de fechas
+ * Recorre el árbol año/mes/día de UNA fuente de stats y devuelve las
+ * partidas que caen dentro del rango de fechas pedido.
  */
-export async function getMatchesInDateRange(startDate?: Date, endDate?: Date): Promise<MatchStats[]> {
+async function getMatchesInDateRangeForSource(
+  source: StatsSource,
+  startDate?: Date,
+  endDate?: Date,
+): Promise<MatchStats[]> {
   const matches: MatchStats[] = [];
-  
-  try {
-    // Recorrer años
-    const years = await fs.readdir(STATS_BASE_PATH);
-    
-    for (const year of years) {
-      const yearPath = path.join(STATS_BASE_PATH, year);
-      const yearStat = await fs.stat(yearPath);
-      
-      if (!yearStat.isDirectory()) continue;
-      
-      // Recorrer meses
-      const months = await fs.readdir(yearPath);
-      
-      for (const month of months) {
-        const monthPath = path.join(yearPath, month);
-        const monthStat = await fs.stat(monthPath);
-        
-        if (!monthStat.isDirectory()) continue;
-        
-        // Recorrer días
-        const days = await fs.readdir(monthPath);
-        
-        for (const day of days) {
-          const dayPath = path.join(monthPath, day);
-          const dayStat = await fs.stat(dayPath);
-          
-          if (!dayStat.isDirectory()) continue;
-          
-          // Verificar si está en el rango de fechas
-          const currentDate = new Date(`${year}-${month}-${day}`);
-          if (startDate && currentDate < startDate) continue;
-          if (endDate && currentDate > endDate) continue;
-          
-          // Leer archivos XML del día
-          const files = await fs.readdir(dayPath);
-          
-          for (const file of files) {
-            if (file.endsWith('.xml')) {
-              const filePath = path.join(dayPath, file);
-              try {
-                const match = await parseMatchXML(filePath);
-                matches.push(match);
-              } catch (err) {
-                console.error(`Error parsing ${filePath}:`, err);
-              }
+
+  const years = await fs.readdir(source.path);
+
+  for (const year of years) {
+    const yearPath = path.join(source.path, year);
+    const yearStat = await fs.stat(yearPath);
+
+    if (!yearStat.isDirectory()) continue;
+
+    const months = await fs.readdir(yearPath);
+
+    for (const month of months) {
+      const monthPath = path.join(yearPath, month);
+      const monthStat = await fs.stat(monthPath);
+
+      if (!monthStat.isDirectory()) continue;
+
+      const days = await fs.readdir(monthPath);
+
+      for (const day of days) {
+        const dayPath = path.join(monthPath, day);
+        const dayStat = await fs.stat(dayPath);
+
+        if (!dayStat.isDirectory()) continue;
+
+        const currentDate = new Date(`${year}-${month}-${day}`);
+        if (startDate && currentDate < startDate) continue;
+        if (endDate && currentDate > endDate) continue;
+
+        const files = await fs.readdir(dayPath);
+
+        for (const file of files) {
+          if (file.endsWith('.xml')) {
+            const filePath = path.join(dayPath, file);
+            try {
+              const match = await parseMatchXML(filePath, source.path, source.tag);
+              matches.push(match);
+            } catch (err) {
+              console.error(`Error parsing ${filePath}:`, err);
             }
           }
         }
       }
     }
-  } catch (err) {
-    console.error('Error reading stats directory:', err);
   }
-  
+
   return matches;
 }
 
 /**
- * Obtiene las partidas de un día específico
+ * Obtiene todas las partidas en un rango de fechas, recorriendo TODAS las
+ * fuentes conocidas (la carpeta compartida histórica + una por cada
+ * instancia/server aislado bajo Quake3/instances).
+ */
+export async function getMatchesInDateRange(startDate?: Date, endDate?: Date): Promise<MatchStats[]> {
+  const matches: MatchStats[] = [];
+
+  for (const source of STATS_SOURCES) {
+    try {
+      const sourceMatches = await getMatchesInDateRangeForSource(source, startDate, endDate);
+      matches.push(...sourceMatches);
+    } catch (err) {
+      // Una fuente puede no tener partidas todavía (server nunca jugado) --
+      // no es un error real, seguimos con las demás.
+      console.error(`Error reading stats directory (${source.tag}: ${source.path}):`, err);
+    }
+  }
+
+  return matches;
+}
+
+/**
+ * Obtiene las partidas de un día específico, en todas las fuentes conocidas.
  */
 export async function getMatchesByDate(year: string, month: string, day: string): Promise<MatchStats[]> {
   const matches: MatchStats[] = [];
-  const dayPath = path.join(STATS_BASE_PATH, year, month, day);
-  
-  try {
-    const files = await fs.readdir(dayPath);
-    
-    for (const file of files) {
-      if (file.endsWith('.xml')) {
-        const filePath = path.join(dayPath, file);
-        try {
-          const match = await parseMatchXML(filePath);
-          matches.push(match);
-        } catch (err) {
-          console.error(`Error parsing ${filePath}:`, err);
+
+  for (const source of STATS_SOURCES) {
+    const dayPath = path.join(source.path, year, month, day);
+
+    try {
+      const files = await fs.readdir(dayPath);
+
+      for (const file of files) {
+        if (file.endsWith('.xml')) {
+          const filePath = path.join(dayPath, file);
+          try {
+            const match = await parseMatchXML(filePath, source.path, source.tag);
+            matches.push(match);
+          } catch (err) {
+            console.error(`Error parsing ${filePath}:`, err);
+          }
         }
       }
+    } catch (err) {
+      // Esa fuente puede no tener partidas ese día en particular -- normal.
     }
-  } catch (err) {
-    console.error('Error reading day directory:', err);
   }
-  
+
   return matches;
 }
 

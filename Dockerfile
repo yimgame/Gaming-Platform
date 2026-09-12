@@ -23,4 +23,4 @@ ENV PORT=5001
 
 EXPOSE 5001
 
-CMD ["sh", "-c", "npm run db:push && npm start"]
+CMD ["sh", "-c", "npm run db:push >/tmp/db-push.log 2>&1 || { echo '[ERROR] db:push failed'; cat /tmp/db-push.log; exit 1; }; rm -f /tmp/db-push.log; npm start"]

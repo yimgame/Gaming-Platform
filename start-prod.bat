@@ -25,6 +25,22 @@ if "%DATABASE_URL%"=="" (
 
 echo DB: %DATABASE_URL%
 
+echo.
+echo Aplicando esquema de base de datos (db:push)...
+set "DB_PUSH_LOG=%TEMP%\yim-db-push.log"
+call npm run db:push >"%DB_PUSH_LOG%" 2>&1
+if errorlevel 1 (
+	echo [ERROR] No se pudo aplicar el esquema en la base de datos.
+	echo Verifica que PostgreSQL este levantado y DATABASE_URL sea correcta.
+	echo --- Detalle db:push ---
+	type "%DB_PUSH_LOG%"
+	pause
+	exit /b 1
+)
+if exist "%DB_PUSH_LOG%" del "%DB_PUSH_LOG%" >nul 2>&1
+
+echo [OK] Esquema actualizado.
+
 npm start
 
 pause

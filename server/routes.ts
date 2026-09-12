@@ -37,6 +37,7 @@ import {
   getMatchesFromStatsDb,
   isMissingStatsTablesError,
   syncMatchesToStatsDb,
+  triggerStatsAutoSyncInBackground,
 } from "./match-stats-db-service";
 import {
   createContactMessage,
@@ -62,7 +63,9 @@ import {
   SCREENSHOTS_BASE_PATH,
   STATS_BASE_PATH,
 } from "./config";
-import { getServerStatus, refreshServerStatus } from "./q3a-status";
+import { getServerStatus, refreshServerStatus, getMultipleServerStatuses } from "./q3a-status";
+import { getCs16ServerStatuses } from "./cs16-status";
+import { getMinecraftServerStatuses } from "./minecraft-status";
 import { getMapLevelshot } from "./levelshots-service";
 import {
   deleteLevelshotOverride,
@@ -695,22 +698,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Obtener todas las partidas
   app.get("/api/stats/matches", async (req, res) => {
     try {
-      await autoSyncStatsFromXmlToDb();
-      let matches = await getMatchesFromStatsDb();
+      // Sin `limit`, la pestaña "Partidas" de la web pedía TODAS las
+      // partidas (ya son ~19000 con jugadores/armas/items completos --
+      // más de 100MB de JSON, inmanejable para el navegador). Acotamos a
+      // las más recientes salvo que pidan explícitamente otra cantidad.
+      const requestedLimit = parseInt(req.query.limit as string, 10);
+      const limit = Number.isFinite(requestedLimit) && requestedLimit > 0
+        ? Math.min(requestedLimit, 1000)
+        : 200;
+
+      let matches = await getMatchesFromStatsDb({ limit });
+
       if (matches.length === 0) {
         const parsedMatches = await getAllMatches();
         if (parsedMatches.length > 0) {
-          await syncMatchesToStatsDb(parsedMatches);
-          matches = await getMatchesFromStatsDb();
+          try {
+            await syncMatchesToStatsDb(parsedMatches);
+            matches = await getMatchesFromStatsDb({ limit });
+          } catch (syncError) {
+            console.warn("Stats sync failed while loading matches, using XML fallback for response:", syncError);
+            matches = parsedMatches.slice(0, limit);
+          }
         }
       }
+
+      triggerStatsAutoSyncInBackground();
 
       res.json({ matches });
     } catch (error) {
       if (isMissingStatsTablesError(error)) {
         try {
           const matches = await getAllMatches();
-          return res.json({ matches });
+          return res.json({ matches: matches.slice(0, 200) });
         } catch (fallbackError) {
           console.error("Error fetching matches from XML fallback:", fallbackError);
         }
@@ -723,16 +742,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Obtener partidas de un día específico
   app.get("/api/stats/matches/:year/:month/:day", async (req, res) => {
     try {
-      await autoSyncStatsFromXmlToDb();
       const { year, month, day } = req.params;
       let matches = await getMatchesByDateFromStatsDb(year, month, day);
       if (matches.length === 0) {
         const parsedMatches = await getMatchesByDate(year, month, day);
         if (parsedMatches.length > 0) {
-          await syncMatchesToStatsDb(parsedMatches);
-          matches = await getMatchesByDateFromStatsDb(year, month, day);
+          try {
+            await syncMatchesToStatsDb(parsedMatches);
+            matches = await getMatchesByDateFromStatsDb(year, month, day);
+          } catch (syncError) {
+            console.warn("Stats sync failed while loading matches by date, using XML fallback for response:", syncError);
+            matches = parsedMatches;
+          }
         }
       }
+
+      triggerStatsAutoSyncInBackground();
 
       res.json({ matches });
     } catch (error) {
@@ -819,6 +844,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Estado en vivo de TODOS los servers de Quake3 (los 6 fijos + los que
+  // arranque el launcher bajo demanda), no solo uno.
+  app.get("/api/server/status/all", async (req, res) => {
+    try {
+      const servers = [
+        { label: "FFA", port: 27960 },
+        { label: "1v1", port: 27961 },
+        { label: "2v2", port: 27962 },
+        { label: "TDM", port: 27963 },
+        { label: "CTF", port: 27964 },
+        { label: "CA", port: 27965 },
+        { label: "1v1 (bajo demanda)", port: 28060 },
+        { label: "FFA (bajo demanda)", port: 28061 },
+        { label: "TDM (bajo demanda)", port: 28062 },
+        { label: "CTF (bajo demanda)", port: 28063 },
+        { label: "CA (bajo demanda)", port: 28064 },
+        { label: "FTAG (bajo demanda)", port: 28065 },
+        { label: "CTFS (bajo demanda)", port: 28066 },
+        { label: "RA (bajo demanda)", port: 28067 },
+      ];
+      const statuses = await getMultipleServerStatuses(servers);
+      res.json(statuses.filter((s) => s.online));
+    } catch (error) {
+      console.error("Error fetching all server statuses:", error);
+      res.status(500).json({ error: "Failed to fetch server statuses" });
+    }
+  });
+
   // Forzar actualización del estado del servidor
   app.post("/api/server/refresh", async (req, res) => {
     try {
@@ -830,6 +883,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
         online: false, 
         error: "Failed to refresh server status" 
       });
+    }
+  });
+
+  // Estado en vivo de los 3 servers de Counter-Strike 1.6 (motor GoldSrc)
+  app.get("/api/cs16/status/all", async (req, res) => {
+    try {
+      const servers = [
+        { label: "Bomb Defusal", port: 27015 },
+        { label: "Hostage Rescue", port: 27016 },
+        { label: "Fun Arena", port: 27017 },
+      ];
+      const statuses = await getCs16ServerStatuses(servers);
+      res.json(statuses.filter((s) => s.online));
+    } catch (error) {
+      console.error("Error fetching CS 1.6 server statuses:", error);
+      res.status(500).json({ error: "Failed to fetch CS 1.6 server statuses" });
+    }
+  });
+
+  // Estado en vivo de los servers de Minecraft Java Edition (Vanilla/Paper/Forge)
+  app.get("/api/minecraft/status/all", async (req, res) => {
+    try {
+      const servers = [
+        { label: "Vanilla", port: 25565 },
+        { label: "Paper", port: 25566 },
+        { label: "Forge (mods)", port: 25567 },
+      ];
+      const statuses = await getMinecraftServerStatuses(servers);
+      res.json(statuses.filter((s) => s.online));
+    } catch (error) {
+      console.error("Error fetching Minecraft server statuses:", error);
+      res.status(500).json({ error: "Failed to fetch Minecraft server statuses" });
     }
   });
 
@@ -1192,18 +1277,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { mapName } = req.params;
       const override = await getLevelshotOverride(mapName);
       if (override) {
-        return res.redirect(302, override.imageUrl);
+        if (override.imageUrl.startsWith("/")) {
+          return res.redirect(302, override.imageUrl);
+        }
+
+        if (/^https?:\/\//i.test(override.imageUrl)) {
+          try {
+            const response = await fetch(override.imageUrl, {
+              headers: {
+                "user-agent": "Mozilla/5.0 (compatible; YIM-Levelshot-Proxy/1.0)",
+                "accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+              },
+              redirect: "follow",
+            });
+
+            if (response.ok) {
+              const contentType = response.headers.get("content-type") || "image/jpeg";
+              const arrayBuffer = await response.arrayBuffer();
+              const buffer = Buffer.from(arrayBuffer);
+
+              res.setHeader("Content-Type", contentType);
+              res.setHeader("Cache-Control", "public, max-age=3600");
+              return res.send(buffer);
+            }
+
+            console.warn(`Levelshot override fetch failed for ${mapName}: HTTP ${response.status}`);
+          } catch (proxyError) {
+            console.warn(`Levelshot override fetch failed for ${mapName}:`, proxyError);
+          }
+        }
       }
 
       const levelshot = await getMapLevelshot(mapName);
 
-      if (!levelshot) {
-        return res.status(404).json({ error: "Levelshot not found" });
+      if (levelshot) {
+        res.setHeader("Content-Type", levelshot.mimeType);
+        res.setHeader("Cache-Control", "public, max-age=3600");
+        return res.send(levelshot.buffer);
       }
 
-      res.setHeader("Content-Type", levelshot.mimeType);
-      res.setHeader("Cache-Control", "public, max-age=3600");
-      res.send(levelshot.buffer);
+      return res.status(404).json({ error: "Levelshot not found" });
     } catch (error) {
       console.error("Error serving levelshot:", error);
       res.status(500).json({ error: "Failed to serve levelshot" });
@@ -1248,3 +1361,4 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   return httpServer;
 }
+

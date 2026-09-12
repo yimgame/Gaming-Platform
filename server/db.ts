@@ -1,12 +1,13 @@
 import { Pool } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import * as schema from "@shared/schema";
+import { resolveDatabaseUrl } from './database-url';
 
-if (!process.env.DATABASE_URL) {
-  throw new Error(
-    "DATABASE_URL must be set. Did you forget to provision a database?",
-  );
+const resolvedDb = resolveDatabaseUrl(process.env.DATABASE_URL);
+
+if (resolvedDb.usedHostFallback) {
+  console.warn("DATABASE_URL host 'db' detected outside Docker. Using localhost fallback for PostgreSQL.");
 }
 
-export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+export const pool = new Pool({ connectionString: resolvedDb.url });
 export const db = drizzle(pool, { schema });

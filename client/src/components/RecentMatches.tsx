@@ -538,7 +538,7 @@ export default function RecentMatches() {
           Partidas Recientes
         </h2>
         <Badge variant="outline" className="text-sm">
-          {matches.length} partidas
+          últimas {matches.length}
         </Badge>
       </div>
 
@@ -550,7 +550,7 @@ export default function RecentMatches() {
           <DialogHeader>
             <DialogTitle>Partidas Recientes</DialogTitle>
             <DialogDescription>
-              Total de {matches.length} partidas registradas. Haz clic en una para ver detalles.
+              Mostrando las {matches.length} partidas más recientes (hay muchas más en el histórico). Haz clic en una para ver detalles.
             </DialogDescription>
           </DialogHeader>
           
@@ -639,3 +639,4 @@ export default function RecentMatches() {
     </Card>
   );
 }
+

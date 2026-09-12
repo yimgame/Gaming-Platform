@@ -25,6 +25,17 @@ let cachedStatus: QuakeServerStatus | null = null;
 let lastQueryTime = 0;
 const CACHE_DURATION = 30000; // 30 segundos
 
+export interface QuakeServerEntry {
+  label: string;
+  port: number;
+}
+
+export interface QuakeServerStatusEntry extends QuakeServerStatus {
+  label: string;
+  port: number;
+  host: string;
+}
+
 // Configuración RCON (para uso futuro)
 const RCON_PASSWORD = process.env.Q3A_RCON_PASSWORD || 'Megcone';
 
@@ -271,4 +282,83 @@ export async function sendRconCommand(
       }
     });
   });
+}
+
+
+/**
+ * Igual que queryQuakeServer pero SIN cache global (esa cache es de un único
+ * valor compartido, así que sirve para consultar UN server; para consultar
+ * varios en paralelo cada uno necesita su propia consulta fresca).
+ */
+function queryQuakeServerNoCache(
+  host: string,
+  port: number,
+  timeout: number = 3000,
+): Promise<QuakeServerStatus> {
+  return new Promise((resolve) => {
+    const client = dgram.createSocket('udp4');
+    let resolved = false;
+
+    const timeoutId = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        client.close();
+        resolve({ online: false, error: 'Timeout - servidor no responde', lastUpdate: new Date() });
+      }
+    }, timeout);
+
+    const command = Buffer.concat([Buffer.from([0xFF, 0xFF, 0xFF, 0xFF]), Buffer.from('getstatus\n')]);
+
+    client.on('message', (msg) => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timeoutId);
+      client.close();
+      try {
+        resolve(parseQuakeResponse(msg));
+      } catch (error) {
+        resolve({
+          online: false,
+          error: error instanceof Error ? error.message : 'Error desconocido',
+          lastUpdate: new Date(),
+        });
+      }
+    });
+
+    client.on('error', (err) => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timeoutId);
+      client.close();
+      resolve({ online: false, error: err.message, lastUpdate: new Date() });
+    });
+
+    client.send(command, port, host, (err) => {
+      if (err && !resolved) {
+        resolved = true;
+        clearTimeout(timeoutId);
+        client.close();
+        resolve({ online: false, error: err.message, lastUpdate: new Date() });
+      }
+    });
+  });
+}
+
+/**
+ * Consulta EN PARALELO una lista de servers (mismo host, distintos puertos) --
+ * pensado para mostrar todos los modos de Quake3 corriendo a la vez (los 6
+ * fijos + los que arranque el launcher bajo demanda), no solo uno.
+ */
+export async function getMultipleServerStatuses(
+  entries: QuakeServerEntry[],
+  host?: string,
+): Promise<QuakeServerStatusEntry[]> {
+  const realHost = host || process.env.QUAKE_SERVER_HOST || 'localhost';
+  const results = await Promise.all(
+    entries.map(async (entry) => {
+      const status = await queryQuakeServerNoCache(realHost, entry.port);
+      return { ...status, label: entry.label, port: entry.port, host: realHost };
+    }),
+  );
+  return results;
 }

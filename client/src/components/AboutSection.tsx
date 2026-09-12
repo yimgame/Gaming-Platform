@@ -1,26 +1,65 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Terminal } from "lucide-react";
 import { useSiteSettings } from "@/hooks/use-site-settings";
 
+const CHAR_TYPE_MS = 18; // velocidad de tipeo, ms por letra
+const LINE_PAUSE_MS = 250; // pausa entre una línea y la siguiente
+
 export default function AboutSection() {
-  const [visibleLines, setVisibleLines] = useState<number>(0);
   const { settings } = useSiteSettings();
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [hasStarted, setHasStarted] = useState(false);
+  const [lineIndex, setLineIndex] = useState(0);
+  const [charIndex, setCharIndex] = useState(0);
 
-  const terminalLines = settings.aboutLines.map((text, index) => ({
-    text,
-    delay: index * 450,
-  }));
+  const terminalLines = useMemo(() => settings.aboutLines, [settings.aboutLines]);
 
+  // Arranca el tipeo recién cuando la sección entra en foco (viewport),
+  // como el efecto original -- no apenas se monta el componente.
   useEffect(() => {
-    setVisibleLines(0);
-    const timers = terminalLines.map((line, index) => 
-      setTimeout(() => {
-        setVisibleLines(index + 1);
-      }, line.delay)
-    );
+    const node = containerRef.current;
+    if (!node || hasStarted) return;
 
-    return () => timers.forEach(timer => clearTimeout(timer));
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setHasStarted(true);
+          observer.disconnect();
+        }
+      },
+      { threshold: 0.3 },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [hasStarted]);
+
+  // Reinicia el tipeo si cambia el contenido (ej. se edita desde /admin)
+  useEffect(() => {
+    setLineIndex(0);
+    setCharIndex(0);
   }, [terminalLines]);
+
+  // Motor de tipeo letra por letra: avanza charIndex dentro de la línea
+  // actual; al completarla, hace una pausa corta y pasa a la siguiente.
+  useEffect(() => {
+    if (!hasStarted) return;
+    if (lineIndex >= terminalLines.length) return;
+
+    const currentLine = terminalLines[lineIndex] ?? "";
+
+    if (charIndex < currentLine.length) {
+      const timer = setTimeout(() => setCharIndex((c) => c + 1), CHAR_TYPE_MS);
+      return () => clearTimeout(timer);
+    }
+
+    const timer = setTimeout(() => {
+      setLineIndex((l) => l + 1);
+      setCharIndex(0);
+    }, LINE_PAUSE_MS);
+    return () => clearTimeout(timer);
+  }, [hasStarted, lineIndex, charIndex, terminalLines]);
+
+  const isDone = lineIndex >= terminalLines.length;
 
   return (
     <section id="about" className="relative py-24 px-4 sm:px-6 lg:px-8">
@@ -36,7 +75,7 @@ export default function AboutSection() {
 
       <div className="relative max-w-7xl mx-auto">
         <div className="text-center mb-16">
-          <h2 
+          <h2
             className="font-serif text-4xl sm:text-5xl md:text-6xl font-bold mb-4 text-primary"
             style={{
               filter: "drop-shadow(0 0 16px currentColor)",
@@ -45,13 +84,13 @@ export default function AboutSection() {
           >
             {settings.aboutTitle}
           </h2>
-          <div className="w-32 h-1 bg-gradient-to-r from-transparent via-primary to-transparent mx-auto" 
-            style={{ filter: "drop-shadow(0 0 8px rgb(0 240 255))" }} 
+          <div className="w-32 h-1 bg-gradient-to-r from-transparent via-primary to-transparent mx-auto"
+            style={{ filter: "drop-shadow(0 0 8px rgb(0 240 255))" }}
           />
         </div>
 
         <div className="max-w-4xl mx-auto">
-          <div className="bg-card/30 backdrop-blur-sm border-2 border-primary/30 rounded-lg overflow-hidden"
+          <div ref={containerRef} className="bg-card/30 backdrop-blur-sm border-2 border-primary/30 rounded-lg overflow-hidden"
             style={{ filter: "drop-shadow(0 0 24px rgb(0 240 255 / 0.2))" }}
           >
             <div className="bg-primary/10 border-b border-primary/30 px-4 py-3 flex items-center gap-2">
@@ -67,24 +106,30 @@ export default function AboutSection() {
             </div>
 
             <div className="p-6 font-mono text-sm space-y-2 min-h-[400px]">
-              {terminalLines.slice(0, visibleLines).map((line, index) => (
-                <div 
-                  key={index}
-                  className={`${
-                    line.text.startsWith('$') 
-                      ? 'text-primary' 
-                      : line.text.startsWith('>') 
-                        ? 'text-foreground/80' 
-                        : 'text-foreground/40'
-                  }`}
-                  data-testid={`text-terminal-line-${index}`}
-                >
-                  {line.text}
-                  {index === visibleLines - 1 && line.text && (
-                    <span className="inline-block w-2 h-4 bg-primary ml-1 animate-pulse" />
-                  )}
-                </div>
-              ))}
+              {terminalLines.slice(0, isDone ? terminalLines.length : lineIndex + 1).map((fullText, index) => {
+                const isCurrentLine = !isDone && index === lineIndex;
+                const displayedText = isCurrentLine ? fullText.slice(0, charIndex) : fullText;
+                const isCursorHere = isDone ? index === terminalLines.length - 1 : isCurrentLine;
+
+                return (
+                  <div
+                    key={index}
+                    className={`${
+                      fullText.startsWith('$')
+                        ? 'text-primary'
+                        : fullText.startsWith('>')
+                          ? 'text-foreground/80'
+                          : 'text-foreground/40'
+                    }`}
+                    data-testid={`text-terminal-line-${index}`}
+                  >
+                    {displayedText}
+                    {isCursorHere && (
+                      <span className="inline-block w-2 h-4 bg-primary ml-1 animate-pulse" />
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
 
