@@ -1,6 +1,7 @@
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { SCREENSHOTS_BASE_PATH } from './config';
+import { enVentanaArOUtc } from './hora-ar';
 
 const isScreenshotMatchDebugEnabled = process.env.DEBUG_SCREENSHOT_MATCH === '1';
 const logScreenshotDebug = (...args: unknown[]) => {
@@ -247,7 +248,7 @@ export async function getScreenshotsByMatch(
     // Prioriza la fecha embebida en el nombre y usa mtime como fallback.
     const screenshotTime = parsed.date || screenshot.timestamp;
     if (!screenshotTime) return false;
-    const timeMatch = screenshotTime >= windowStart && screenshotTime <= windowEnd;
+    const timeMatch = enVentanaArOUtc(screenshotTime, matchDate, timeWindowMinutes);
     
     if (timeMatch) {
       const timeDiffSeconds = Math.abs(screenshotTime.getTime() - matchDate.getTime()) / 1000;

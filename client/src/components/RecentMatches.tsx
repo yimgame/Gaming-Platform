@@ -10,7 +10,6 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import {
   Table,
@@ -22,9 +21,17 @@ import {
 } from "@/components/ui/table";
 import { Calendar, Image as ImageIcon } from "lucide-react";
 import type { MatchStats } from "@shared/stats-schema";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import PlayerAssetsUploader from "@/components/PlayerAssetsUploader";
 
-interface Screenshot {
+interface SubidaInfo {
+  assetId?: string;
+  pov?: string | null;
+  uploadedBy?: string | null;
+  origin?: string | null;
+}
+
+interface Screenshot extends SubidaInfo {
   filename: string;
   path: string;
   url: string;
@@ -32,7 +39,7 @@ interface Screenshot {
   size?: number;
 }
 
-interface DemoFile {
+interface DemoFile extends SubidaInfo {
   filename: string;
   url: string;
   timestamp?: Date;
@@ -40,20 +47,45 @@ interface DemoFile {
   protocol?: string;
 }
 
-async function fetchMatches(): Promise<MatchStats[]> {
-  const response = await fetch("/api/stats/matches");
-  
+interface FiltrosPartidas {
+  type: string;
+  map: string;
+  player: string;
+  from: string;
+  to: string;
+}
+
+interface PaginaPartidas {
+  matches: MatchStats[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+const MODOS = ["1v1", "2v2", "CA", "CTF", "CTFS", "FFA", "FT", "NTF", "TDM"];
+
+async function fetchMatchesPage(page: number, pageSize: number, f: FiltrosPartidas): Promise<PaginaPartidas> {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+  for (const [k, v] of Object.entries(f)) if (v.trim()) params.set(k, v.trim());
+  const response = await fetch(`/api/stats/matches?${params.toString()}`);
   if (!response.ok) {
     throw new Error("Failed to fetch matches");
   }
-  
-  const data = await response.json();
-  return data.matches;
+  return response.json();
+}
+
+function etiquetaSubida(item: SubidaInfo) {
+  if (item.origin === "jugador") {
+    return item.pov ? `POV de ${item.pov} · subida por ${item.uploadedBy}` : `subida por ${item.uploadedBy}`;
+  }
+  return item.pov ? `POV de ${item.pov}` : null;
 }
 
 function formatDateTime(datetime: string) {
-  const date = new Date(datetime.replace(/\//g, '-'));
-  return date.toLocaleString('es-ES', {
+  // el server ya la manda en hora de Buenos Aires ("AAAA/MM/DD HH:MM:SS"); se muestra tal cual
+  const m = datetime.match(/^(\d{4})\/(\d{2})\/(\d{2})\s+(\d{2}):(\d{2})(?::(\d{2}))?/);
+  const date = m ? new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0)) : new Date(datetime.replace(/\//g, '-'));
+  return date.toLocaleString('es-AR', {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
@@ -167,6 +199,26 @@ function MatchDetailsDialog({ match, open, onOpenChange }: { match: MatchStats |
     },
   });
 
+  const deleteAssetMutation = useMutation({
+    mutationFn: async ({ assetId }: { assetId: string; kind: "screenshot" | "demo" }) => {
+      const response = await fetch(`/api/match-assets/${encodeURIComponent(assetId)}`, {
+        method: "DELETE",
+        headers: { "x-admin-token": adminToken },
+      });
+      if (!response.ok) throw new Error("No se pudo borrar");
+      return response.json();
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: [variables.kind === "demo" ? "match-demos" : "match-screenshots", match.id] });
+    },
+  });
+
+  const borrarSubida = (kind: "screenshot" | "demo", item: SubidaInfo & { filename: string }) => {
+    if (!item.assetId) return;
+    if (!window.confirm(`¿Borrar ${item.filename}${item.uploadedBy ? ` (subida por ${item.uploadedBy})` : ""}?`)) return;
+    deleteAssetMutation.mutate({ assetId: item.assetId, kind });
+  };
+
   const handleManualAssociate = (kind: "screenshot" | "demo") => {
     const filename = (kind === "screenshot" ? manualScreenshotFilename : manualDemoFilename).trim();
     const file = kind === "screenshot" ? manualScreenshotFile : manualDemoFile;
@@ -270,16 +322,25 @@ function MatchDetailsDialog({ match, open, onOpenChange }: { match: MatchStats |
                 ) : demos && demos.length > 0 ? (
                   <div className="space-y-2">
                     <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
-                      <span className="font-medium text-foreground">Demo</span>
-                      <span>{demos[0].protocol ? `Protocolo ${demos[0].protocol}` : "Protocolo N/D"}</span>
+                      <span className="font-medium text-foreground">{demos.length > 1 ? `Demos (${demos.length})` : "Demo"}</span>
+                      <span>{demos[0].protocol ? `Protocolo ${demos[0].protocol}` : ""}</span>
                     </div>
-                    <Button
-                      size="sm"
-                      className="w-1/2 mx-auto"
-                      onClick={() => window.open(demos[0].url, "_blank")}
-                    >
-                      Descargar demo
-                    </Button>
+                    {demos.map((demo) => (
+                      <div key={demo.url} className="rounded border border-border/60 p-2 space-y-1">
+                        <p className="text-xs font-medium">{etiquetaSubida(demo) ?? demo.filename}</p>
+                        <div className="flex gap-2">
+                          <Button size="sm" className="flex-1" onClick={() => window.open(demo.url, "_blank")}>
+                            Descargar
+                          </Button>
+                          {adminEnabled && demo.assetId && (
+                            <Button size="sm" variant="destructive" onClick={() => borrarSubida("demo", demo)}
+                                    disabled={deleteAssetMutation.isPending}>
+                              Borrar
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 ) : (
                   <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
@@ -347,8 +408,28 @@ function MatchDetailsDialog({ match, open, onOpenChange }: { match: MatchStats |
                   <div className="p-2 bg-muted text-xs text-muted-foreground text-center">
                     <ImageIcon className="inline w-3 h-3 mr-1" />
                     Haz clic para ver en grande
-                    {screenshots.length > 1 && ` • +${screenshots.length - 1} más`}
+                    {etiquetaSubida(screenshots[0]) && ` • ${etiquetaSubida(screenshots[0])}`}
+                    {adminEnabled && screenshots[0].assetId && (
+                      <button className="ml-2 text-destructive underline" onClick={() => borrarSubida("screenshot", screenshots[0])}>
+                        borrar
+                      </button>
+                    )}
                   </div>
+                  {screenshots.length > 1 && (
+                    <div className="flex gap-2 p-2 overflow-x-auto bg-muted/60">
+                      {screenshots.slice(1).map((shot) => (
+                        <div key={shot.url} className="shrink-0 text-center">
+                          <img src={shot.url} alt={shot.filename} title={etiquetaSubida(shot) ?? shot.filename}
+                               className="h-16 rounded cursor-pointer hover:opacity-80" onClick={() => window.open(shot.url, "_blank")} />
+                          {adminEnabled && shot.assetId && (
+                            <button className="text-[10px] text-destructive underline" onClick={() => borrarSubida("screenshot", shot)}>
+                              borrar
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   {adminEnabled && (
                     <div className="p-2 border-t border-border bg-muted/30 space-y-2">
                       <input
@@ -489,154 +570,159 @@ function MatchDetailsDialog({ match, open, onOpenChange }: { match: MatchStats |
   );
 }
 
+const FILTROS_VACIOS: FiltrosPartidas = { type: "", map: "", player: "", from: "", to: "" };
+
 export default function RecentMatches() {
   const [selectedMatch, setSelectedMatch] = useState<MatchStats | null>(null);
   const [showDetailsDialog, setShowDetailsDialog] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [borrador, setBorrador] = useState<FiltrosPartidas>(FILTROS_VACIOS);   // lo que se tipea
+  const [filtros, setFiltros] = useState<FiltrosPartidas>(FILTROS_VACIOS);     // lo aplicado
 
-  const { data: matches, isLoading, error } = useQuery({
-    queryKey: ["matches"],
-    queryFn: fetchMatches,
+  // los campos de texto se aplican solos al dejar de tipear (medio segundo)
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      setFiltros((actual) => {
+        const iguales = (Object.keys(borrador) as (keyof FiltrosPartidas)[]).every((k) => borrador[k] === actual[k]);
+        if (iguales) return actual;
+        setPage(1);
+        return borrador;
+      });
+    }, 500);
+    return () => window.clearTimeout(t);
+  }, [borrador]);
+
+  const { data, isLoading, isFetching, error } = useQuery({
+    queryKey: ["matches", page, pageSize, filtros],
+    queryFn: () => fetchMatchesPage(page, pageSize, filtros),
+    placeholderData: (previo) => previo,
   });
 
-  if (isLoading) {
-    return (
-      <Card className="p-6">
-        <div className="animate-pulse space-y-4">
-          <div className="h-8 bg-muted rounded w-1/4" />
-          <div className="space-y-2">
-            {[1, 2, 3, 4, 5].map((i) => (
-              <div key={i} className="h-16 bg-muted rounded" />
-            ))}
-          </div>
-        </div>
-      </Card>
-    );
-  }
-
-  if (error || !matches) {
-    return (
-      <Card className="p-6">
-        <p className="text-destructive">Error cargando las partidas</p>
-      </Card>
-    );
-  }
-
-  const sortedMatches = [...matches].sort((a, b) => {
-    return new Date(b.datetime).getTime() - new Date(a.datetime).getTime();
-  });
+  const total = data?.total ?? 0;
+  const paginas = Math.max(1, Math.ceil(total / pageSize));
+  const matches = data?.matches ?? [];
+  const hayFiltros = Object.values(filtros).some((v) => v.trim());
 
   const handleMatchClick = (match: MatchStats) => {
     setSelectedMatch(match);
     setShowDetailsDialog(true);
   };
 
+  const campo = (k: keyof FiltrosPartidas) => ({
+    value: borrador[k],
+    onChange: (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setBorrador((b) => ({ ...b, [k]: e.target.value })),
+  });
+
   return (
     <Card className="p-6">
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <h2 className="text-2xl font-bold flex items-center">
           <Calendar className="w-6 h-6 mr-2 text-primary" />
-          Partidas Recientes
+          Partidas
         </h2>
-        <Badge variant="outline" className="text-sm">
-          últimas {matches.length}
-        </Badge>
-      </div>
-
-      <Dialog>
-        <DialogTrigger asChild>
-          <Button variant="default">Ver todas las partidas</Button>
-        </DialogTrigger>
-        <DialogContent className="max-w-4xl max-h-96 overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Partidas Recientes</DialogTitle>
-            <DialogDescription>
-              Mostrando las {matches.length} partidas más recientes (hay muchas más en el histórico). Haz clic en una para ver detalles.
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Fecha</TableHead>
-                  <TableHead>Mapa</TableHead>
-                  <TableHead>Modo</TableHead>
-                  <TableHead>Duración</TableHead>
-                  <TableHead>Jugadores</TableHead>
-                  <TableHead>Score</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {sortedMatches.map((match) => {
-                  const totalPlayers = match.teams 
-                    ? match.teams.reduce((sum, team) => sum + team.players.length, 0)
-                    : match.players?.length || 0;
-
-                  const scoreDisplay = match.teams
-                    ? `${match.teams[0]?.score || 0} - ${match.teams[1]?.score || 0}`
-                    : `${match.players?.[0]?.score || 0} max`;
-
-                  return (
-                    <TableRow 
-                      key={`${match.id}-${match.datetime}`}
-                      className="cursor-pointer hover:bg-muted"
-                      onClick={() => handleMatchClick(match)}
-                    >
-                      <TableCell className="font-mono text-sm">
-                        {formatDateTime(match.datetime)}
-                      </TableCell>
-                      <TableCell className="font-semibold">{match.map}</TableCell>
-                      <TableCell>
-                        <Badge variant="secondary">{match.type}</Badge>
-                      </TableCell>
-                      <TableCell className="font-mono">
-                        {formatDuration(match.duration)}
-                      </TableCell>
-                      <TableCell className="text-center">{totalPlayers}</TableCell>
-                      <TableCell className="font-bold">{scoreDisplay}</TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      <div className="mt-6 space-y-2">
-        <p className="text-sm text-muted-foreground">
-          Últimas partidas
-        </p>
-        <div className="space-y-2">
-          {sortedMatches.slice(0, 5).map((match) => (
-            <div
-              key={`${match.id}-${match.datetime}`}
-              onClick={() => handleMatchClick(match)}
-              className="flex items-center justify-between p-3 rounded-lg bg-card border cursor-pointer hover:bg-muted transition-colors"
-            >
-              <div className="flex-1">
-                <p className="font-semibold">{match.map}</p>
-                <p className="text-xs text-muted-foreground">
-                  {formatDateTime(match.datetime)}
-                </p>
-              </div>
-              <div className="text-right">
-                <p className="font-bold">{match.type}</p>
-                <p className="text-xs text-muted-foreground">
-                  {formatDuration(match.duration)}
-                </p>
-              </div>
-            </div>
-          ))}
+        <div className="flex items-center gap-2">
+          <PlayerAssetsUploader />
+          <Badge variant="outline" className="text-sm">
+            {total.toLocaleString("es-AR")} {hayFiltros ? "encontradas" : "en total"}
+          </Badge>
         </div>
       </div>
 
-      <MatchDetailsDialog 
-        match={selectedMatch}
-        open={showDetailsDialog}
-        onOpenChange={setShowDetailsDialog}
-      />
+      {/* filtros */}
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-2 mb-4">
+        <select className="h-9 rounded-md border bg-background px-2 text-sm" {...campo("type")}>
+          <option value="">Todos los modos</option>
+          {MODOS.map((m) => <option key={m} value={m}>{m}</option>)}
+        </select>
+        <Input placeholder="Mapa" className="h-9" {...campo("map")} />
+        <Input placeholder="Jugador" className="h-9" {...campo("player")} />
+        <Input type="date" className="h-9" title="Desde" {...campo("from")} />
+        <Input type="date" className="h-9" title="Hasta" {...campo("to")} />
+        <Button variant="ghost" className="h-9" disabled={!Object.values(borrador).some((v) => v)}
+                onClick={() => { setBorrador(FILTROS_VACIOS); setFiltros(FILTROS_VACIOS); setPage(1); }}>
+          Limpiar filtros
+        </Button>
+      </div>
+
+      {error ? (
+        <p className="text-destructive">Error cargando las partidas</p>
+      ) : isLoading ? (
+        <div className="animate-pulse space-y-2">
+          {Array.from({ length: 5 }).map((_, i) => <div key={i} className="h-10 bg-muted rounded" />)}
+        </div>
+      ) : (
+        <div className={`overflow-x-auto transition-opacity ${isFetching ? "opacity-60" : ""}`}>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Fecha</TableHead>
+                <TableHead>Mapa</TableHead>
+                <TableHead>Modo</TableHead>
+                <TableHead>Duración</TableHead>
+                <TableHead className="text-center">Jugadores</TableHead>
+                <TableHead>Score</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {matches.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                    No hay partidas con esos filtros.
+                  </TableCell>
+                </TableRow>
+              ) : matches.map((match) => {
+                const totalPlayers = match.teams
+                  ? match.teams.reduce((sum, team) => sum + team.players.length, 0)
+                  : match.players?.length || 0;
+                const scoreDisplay = match.teams
+                  ? `${match.teams[0]?.score || 0} - ${match.teams[1]?.score || 0}`
+                  : `${match.players?.[0]?.score || 0} max`;
+                return (
+                  <TableRow key={`${match.id}-${match.datetime}`} className="cursor-pointer hover:bg-muted"
+                            onClick={() => handleMatchClick(match)}>
+                    <TableCell className="font-mono text-sm whitespace-nowrap">{formatDateTime(match.datetime)}</TableCell>
+                    <TableCell className="font-semibold">{match.map}</TableCell>
+                    <TableCell><Badge variant="secondary">{match.type}</Badge></TableCell>
+                    <TableCell className="font-mono">{formatDuration(match.duration)}</TableCell>
+                    <TableCell className="text-center">{totalPlayers}</TableCell>
+                    <TableCell className="font-bold">{scoreDisplay}</TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+
+      {/* paginación */}
+      <div className="flex flex-wrap items-center justify-between gap-3 mt-4 text-sm">
+        <div className="flex items-center gap-2">
+          <span className="text-muted-foreground">Mostrar</span>
+          {[10, 50, 100].map((n) => (
+            <Button key={n} size="sm" variant={pageSize === n ? "default" : "outline"}
+                    onClick={() => { setPageSize(n); setPage(1); }}>{n}</Button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" disabled={page <= 1 || isFetching} onClick={() => setPage(1)}>«</Button>
+          <Button size="sm" variant="outline" disabled={page <= 1 || isFetching} onClick={() => setPage((p) => p - 1)}>Anterior</Button>
+          <span className="text-muted-foreground whitespace-nowrap">
+            Página {page.toLocaleString("es-AR")} de {paginas.toLocaleString("es-AR")}
+          </span>
+          <Button size="sm" variant="outline" disabled={page >= paginas || isFetching} onClick={() => setPage((p) => p + 1)}>Siguiente</Button>
+          <Button size="sm" variant="outline" disabled={page >= paginas || isFetching} onClick={() => setPage(paginas)}>»</Button>
+        </div>
+      </div>
+
+      {selectedMatch && (
+        <MatchDetailsDialog
+          key={selectedMatch.id}
+          match={selectedMatch}
+          open={showDetailsDialog}
+          onOpenChange={setShowDetailsDialog}
+        />
+      )}
     </Card>
   );
 }
-

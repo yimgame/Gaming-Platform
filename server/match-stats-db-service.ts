@@ -9,6 +9,8 @@ import {
 } from "../shared/schema";
 import { db } from "./db";
 import { getAllMatches } from "./stats-parser";
+import { crudoDesdeArgentina, horaArgentina } from "./hora-ar";
+import { NOMBRE_LIMPIO_SQL } from "./player-uploads";
 
 // Con ~1000 partidas (antes de aislar los homepaths) un rescan completo cada
 // 10s era barato. Ahora hay ~19000 XML repartidos en 7-8 carpetas, así que
@@ -267,7 +269,7 @@ export function triggerStatsAutoSyncInBackground(minIntervalMs: number = DEFAULT
   });
 }
 
-interface MatchQueryFilters {
+export interface MatchQueryFilters {
   startDate?: Date;
   endDate?: Date;
   map?: string;
@@ -278,12 +280,18 @@ interface MatchQueryFilters {
   // "Partidas" de la web solo necesita las más recientes, así que sin
   // `limit` explícito acotamos a un tope por defecto.
   limit?: number;
+  offset?: number;
+  /** parte del nombre del mapa (sin distinguir mayúsculas) */
+  mapContains?: string;
+  /** nombre de jugador (sin códigos de color, sin distinguir mayúsculas) */
+  player?: string;
 }
 
 const DEFAULT_MATCHES_LIMIT = 200;
 const MAX_MATCHES_LIMIT = 1000;
 
-async function getMatchesCore(filters: MatchQueryFilters = {}): Promise<MatchStats[]> {
+
+function condicionesDePartidas(filters: MatchQueryFilters) {
   const whereClauses = [];
 
   if (filters.startDate) {
@@ -302,12 +310,34 @@ async function getMatchesCore(filters: MatchQueryFilters = {}): Promise<MatchSta
     whereClauses.push(eq(statsMatches.type, filters.gameType));
   }
 
-  const whereCondition =
-    whereClauses.length > 1
-      ? and(...whereClauses)
-      : whereClauses.length === 1
-        ? whereClauses[0]
-        : undefined;
+  if (filters.mapContains) {
+    whereClauses.push(sql`${statsMatches.map} ILIKE ${"%" + filters.mapContains.replace(/[%_\\]/g, "") + "%"}`);
+  }
+
+  if (filters.player) {
+    const nombre = filters.player.replace(/\^(x[0-9a-fA-F]{6}|.)/g, "").trim().toLowerCase();
+    whereClauses.push(sql`EXISTS (SELECT 1 FROM stats_players sp WHERE sp.match_id = ${statsMatches.matchId}
+      AND ${sql.raw(NOMBRE_LIMPIO_SQL("sp.name"))} = ${nombre})`);
+  }
+
+  return whereClauses.length > 1
+    ? and(...whereClauses)
+    : whereClauses.length === 1
+      ? whereClauses[0]
+      : undefined;
+}
+
+/** Total de partidas que cumplen los filtros (para paginar). */
+export async function countMatchesFromStatsDb(filters: MatchQueryFilters = {}): Promise<number> {
+  const [row] = await db
+    .select({ total: sql<number>`count(*)::int` })
+    .from(statsMatches)
+    .where(condicionesDePartidas(filters));
+  return row?.total ?? 0;
+}
+
+async function getMatchesCore(filters: MatchQueryFilters = {}): Promise<MatchStats[]> {
+  const whereCondition = condicionesDePartidas(filters);
 
   const effectiveLimit = Math.min(filters.limit ?? DEFAULT_MATCHES_LIMIT, MAX_MATCHES_LIMIT);
 
@@ -316,7 +346,8 @@ async function getMatchesCore(filters: MatchQueryFilters = {}): Promise<MatchSta
     .from(statsMatches)
     .where(whereCondition)
     .orderBy(desc(statsMatches.playedAt))
-    .limit(effectiveLimit);
+    .limit(effectiveLimit)
+    .offset(Math.max(0, filters.offset ?? 0));
 
   if (matchRows.length === 0) {
     return [];
@@ -465,7 +496,7 @@ async function getMatchesCore(filters: MatchQueryFilters = {}): Promise<MatchSta
 
   return matchRows.map((match) => ({
     id: match.matchId,
-    datetime: match.datetime,
+    datetime: horaArgentina(match.datetime),
     map: match.map,
     type: match.type,
     isTeamGame: match.isTeamGame,
@@ -480,8 +511,9 @@ export async function getMatchesFromStatsDb(filters: MatchQueryFilters = {}): Pr
 }
 
 export async function getMatchesByDateFromStatsDb(year: string, month: string, day: string): Promise<MatchStats[]> {
-  const start = new Date(Number(year), Number(month) - 1, Number(day), 0, 0, 0);
-  const end = new Date(Number(year), Number(month) - 1, Number(day), 23, 59, 59, 999);
+  // el día pedido es en hora de Buenos Aires; played_at está guardado como vino (UTC desde 2026-07)
+  const start = crudoDesdeArgentina(Number(year), Number(month), Number(day), 0, 0, 0);
+  const end = crudoDesdeArgentina(Number(year), Number(month), Number(day), 23, 59, 59);
   return getMatchesCore({ startDate: start, endDate: end });
 }
 

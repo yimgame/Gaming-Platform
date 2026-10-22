@@ -30,3 +30,6 @@ data/backups/
 data/backups-manual/
 data/backups-upload-temp/
 *.sql
+
+# backups locales de despliegues
+backups/

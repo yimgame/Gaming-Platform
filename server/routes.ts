@@ -28,11 +28,13 @@ import {
 import {
   createManualMatchAsset,
   createManualMatchAssetIfMissing,
+  deleteManualMatchAsset,
   getManualMatchAssetById,
   getManualMatchAssets
 } from "./match-assets-service";
 import {
   autoSyncStatsFromXmlToDb,
+  countMatchesFromStatsDb,
   getMatchesByDateFromStatsDb,
   getMatchesFromStatsDb,
   isMissingStatsTablesError,
@@ -87,11 +89,25 @@ import {
 import { RankingFiltersSchema } from "../shared/stats-schema";
 import fs from "fs";
 import multer from "multer";
+import { crudoDesdeArgentina } from "./hora-ar";
+import {
+  MAX_CAPTURA_BYTES,
+  MAX_DEMO_BYTES,
+  dentroDelLimite,
+  hayEspacio,
+  partidasDeJugador,
+  sha256,
+  validarParaPartida,
+  yaSubido,
+} from "./player-uploads";
 
 const LEVELSHOTS_UPLOAD_DIR = path.resolve(process.cwd(), "data", "levelshots-images");
 const MATCH_ASSETS_UPLOAD_DIR = path.resolve(process.cwd(), "data", "match-assets");
 const MATCH_DEMOS_UPLOAD_DIR = path.join(MATCH_ASSETS_UPLOAD_DIR, "demos");
 const MATCH_SCREENSHOTS_UPLOAD_DIR = path.join(MATCH_ASSETS_UPLOAD_DIR, "screenshots");
+// lo que suben los jugadores va aparte (cupo propio y fácil de revisar/borrar)
+const PLAYER_DEMOS_UPLOAD_DIR = path.join(MATCH_ASSETS_UPLOAD_DIR, "jugadores", "demos");
+const PLAYER_SCREENSHOTS_UPLOAD_DIR = path.join(MATCH_ASSETS_UPLOAD_DIR, "jugadores", "screenshots");
 const BACKUPS_UPLOAD_TEMP_DIR = path.resolve(process.cwd(), "data", "backups-upload-temp");
 
 const ensureLevelshotsUploadDir = async () => {
@@ -236,7 +252,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return token === ADMIN_TOKEN;
   };
 
-  const toUploadedMediaEntry = (asset: { id: string; filename: string; sourcePath: string | null }) => {
+  const toUploadedMediaEntry = (asset: {
+    id: string; filename: string; sourcePath: string | null;
+    pov?: string | null; uploadedBy?: string | null; origin?: string | null;
+  }) => {
     const extension = path.extname(asset.filename || "").toLowerCase();
     const mimeType =
       extension === ".png"
@@ -254,6 +273,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       path: asset.sourcePath || "",
       url: `/api/match-assets/files/${encodeURIComponent(asset.id)}`,
       mimeType,
+      assetId: asset.id,
+      pov: asset.pov ?? null,
+      uploadedBy: asset.uploadedBy ?? null,
+      origin: asset.origin ?? null,
     };
   };
 
@@ -697,6 +720,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   // Obtener todas las partidas
   app.get("/api/stats/matches", async (req, res) => {
+    // Modo paginado (lista de la pestaña Partidas): ?page=1&pageSize=10&type=CTF&map=base&player=Yim&from=2026-10-01&to=2026-10-22
+    // Las fechas de los filtros son en hora de Buenos Aires.
+    if (req.query.page !== undefined) {
+      try {
+        const page = Math.max(1, parseInt(String(req.query.page), 10) || 1);
+        const pageSize = [10, 50, 100].includes(Number(req.query.pageSize)) ? Number(req.query.pageSize) : 10;
+        const texto = (v: unknown, max = 64) => (typeof v === "string" ? v.trim().slice(0, max) : "");
+        const fecha = (v: unknown, finDelDia: boolean) => {
+          const m = texto(v, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+          if (!m) return undefined;
+          return finDelDia
+            ? crudoDesdeArgentina(+m[1], +m[2], +m[3], 23, 59, 59)
+            : crudoDesdeArgentina(+m[1], +m[2], +m[3], 0, 0, 0);
+        };
+        const filters = {
+          gameType: texto(req.query.type, 16) || undefined,
+          mapContains: texto(req.query.map) || undefined,
+          player: texto(req.query.player) || undefined,
+          startDate: fecha(req.query.from, false),
+          endDate: fecha(req.query.to, true),
+        };
+        const [total, matches] = await Promise.all([
+          countMatchesFromStatsDb(filters),
+          getMatchesFromStatsDb({ ...filters, limit: pageSize, offset: (page - 1) * pageSize }),
+        ]);
+        triggerStatsAutoSyncInBackground();
+        return res.json({ matches, total, page, pageSize });
+      } catch (error) {
+        logRouteError("Error fetching paginated matches", error);
+        return res.status(500).json({ error: "Failed to fetch matches" });
+      }
+    }
+
     try {
       // Sin `limit`, la pestaña "Partidas" de la web pedía TODAS las
       // partidas (ya son ~19000 con jugadores/armas/items completos --
@@ -1193,6 +1249,101 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(500).json({ error: "Failed to upload match asset" });
       }
     });
+  });
+
+  // ---------------------------------------------------------------- subidas de los jugadores (sin token)
+  // Partidas de un jugador + lo que ya tiene cada una (para que el navegador proponga qué subir)
+  app.get("/api/player-assets/matches", async (req, res) => {
+    try {
+      const nombre = String(req.query.name || "").trim().slice(0, 40);
+      if (nombre.length < 2) return res.status(400).json({ error: "Escribí tu nombre de jugador" });
+      const matches = await partidasDeJugador(nombre, 500);
+      res.json({ player: nombre, matches });
+    } catch (error) {
+      logRouteError("Error buscando partidas del jugador", error);
+      res.status(500).json({ error: "No se pudieron buscar las partidas" });
+    }
+  });
+
+  const playerUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_DEMO_BYTES, files: 1 } });
+
+  app.post("/api/player-assets/upload", (req, res) => {
+    const ip = String(req.header("cf-connecting-ip") || req.header("x-forwarded-for")?.split(",")[0] || req.socket.remoteAddress || "?").trim();
+    if (!dentroDelLimite(ip)) {
+      return res.status(429).json({ error: "Subiste muchos archivos seguidos: esperá un rato y seguí" });
+    }
+    playerUpload.single("file")(req, res, async (uploadError) => {
+      if (uploadError) {
+        const msg = (uploadError as { code?: string }).code === "LIMIT_FILE_SIZE" ? "el archivo es demasiado grande" : "error al recibir el archivo";
+        return res.status(400).json({ error: msg });
+      }
+      try {
+        const file = (req as unknown as { file?: { buffer: Buffer; originalname: string; size: number } }).file;
+        const matchId = String(req.body?.matchId || "").trim();
+        const kind = String(req.body?.kind || "").trim();
+        const jugador = String(req.body?.playerName || "").trim().slice(0, 40);
+        if (!file || !matchId || (kind !== "demo" && kind !== "screenshot") || !jugador) {
+          return res.status(400).json({ error: "faltan datos (archivo, partida, tipo o jugador)" });
+        }
+        const original = path.basename(file.originalname || "archivo");
+        const ext = path.extname(original).toLowerCase();
+        if (kind === "demo" && !/^\.dm_\d{2}$/.test(ext)) return res.status(400).json({ error: "una demo tiene que ser .dm_XX" });
+        if (kind === "screenshot" && ![".jpg", ".jpeg", ".png", ".tga", ".bmp"].includes(ext)) {
+          return res.status(400).json({ error: "una captura tiene que ser JPG, PNG, TGA o BMP" });
+        }
+        if (kind === "screenshot" && file.size > MAX_CAPTURA_BYTES) return res.status(400).json({ error: "la captura es demasiado grande" });
+
+        let validacion;
+        try {
+          validacion = await validarParaPartida(kind, file.buffer, original, matchId, jugador);
+        } catch (e) {
+          return res.status(422).json({ error: (e as Error).message });
+        }
+        const hash = sha256(file.buffer);
+        if (await yaSubido(matchId, hash)) return res.status(409).json({ error: "ese archivo ya está subido en esta partida" });
+
+        const dirs = [PLAYER_DEMOS_UPLOAD_DIR, PLAYER_SCREENSHOTS_UPLOAD_DIR];
+        if (!hayEspacio(dirs, file.size)) return res.status(507).json({ error: "no hay más lugar para subidas por ahora" });
+        const destinoDir = kind === "demo" ? PLAYER_DEMOS_UPLOAD_DIR : PLAYER_SCREENSHOTS_UPLOAD_DIR;
+        await fs.promises.mkdir(destinoDir, { recursive: true });
+        const destino = path.join(destinoDir, `${Date.now()}-${sanitizeFileNamePart(original)}`);
+        await fs.promises.writeFile(destino, file.buffer, { flag: "wx" });
+
+        const asset = await createManualMatchAsset({
+          matchId,
+          kind,
+          filename: original,
+          sourcePath: destino,
+          uploadedBy: jugador,
+          pov: validacion.pov,
+          sha256: hash,
+          origin: "jugador",
+        });
+        console.log(`[subida jugador] ${kind} ${original} -> partida ${matchId} por "${jugador}" (${ip}) pov=${validacion.pov ?? "-"}`);
+        return res.status(201).json({ ok: true, assetId: asset.id, pov: validacion.pov, detalle: validacion.detalle });
+      } catch (error) {
+        logRouteError("Error en subida de jugador", error);
+        return res.status(500).json({ error: "no se pudo guardar el archivo" });
+      }
+    });
+  });
+
+  // Borrar un archivo asociado (solo admin). Si lo subió alguien (está en data/), se borra el archivo también.
+  app.delete("/api/match-assets/:assetId", async (req, res) => {
+    const token = req.header("x-admin-token") || (req.query.adminToken as string | undefined);
+    if (!isAdminRequest(token)) return res.status(403).json({ error: "Admin token required" });
+    try {
+      const asset = await deleteManualMatchAsset(String(req.params.assetId || ""));
+      if (!asset) return res.status(404).json({ error: "no existe" });
+      const ruta = asset.sourcePath ? path.resolve(asset.sourcePath) : "";
+      if (ruta && ruta.startsWith(MATCH_ASSETS_UPLOAD_DIR + path.sep) && fs.existsSync(ruta)) {
+        await fs.promises.unlink(ruta);
+      }
+      res.json({ ok: true });
+    } catch (error) {
+      logRouteError("Error borrando archivo asociado", error);
+      res.status(500).json({ error: "No se pudo borrar" });
+    }
   });
 
   app.get("/api/match-assets/files/:assetId", async (req, res) => {

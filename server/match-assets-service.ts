@@ -7,6 +7,10 @@ export interface MatchAssetInput {
   kind: "screenshot" | "demo";
   filename: string;
   sourcePath?: string;
+  uploadedBy?: string | null;
+  pov?: string | null;
+  sha256?: string | null;
+  origin?: "admin" | "jugador";
 }
 
 export async function getManualMatchAssets(matchId: string, kind?: "screenshot" | "demo"): Promise<MatchAsset[]> {
@@ -36,6 +40,10 @@ export async function createManualMatchAsset(input: MatchAssetInput): Promise<Ma
     kind: input.kind,
     filename: input.filename,
     sourcePath: input.sourcePath ?? null,
+    uploadedBy: input.uploadedBy ?? null,
+    pov: input.pov ?? null,
+    sha256: input.sha256 ?? null,
+    origin: input.origin ?? "admin",
   }).returning();
 
   return asset;
@@ -59,4 +67,9 @@ export async function createManualMatchAssetIfMissing(input: MatchAssetInput): P
   }
 
   return createManualMatchAsset(input);
+}
+
+export async function deleteManualMatchAsset(id: string): Promise<MatchAsset | null> {
+  const [asset] = await db.delete(matchAssets).where(eq(matchAssets.id, id)).returning();
+  return asset ?? null;
 }

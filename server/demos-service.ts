@@ -1,6 +1,7 @@
 import { promises as fs } from "fs";
 import * as path from "path";
 import { DEMOS_BASE_PATH } from "./config";
+import { enVentanaArOUtc } from "./hora-ar";
 
 export interface DemoFile {
   filename: string;
@@ -170,7 +171,7 @@ export async function getDemosByMatch(
     if (!mapMatch) return false;
 
     const demoTime = parsed.date || demo.timestamp;
-    return demoTime >= windowStart && demoTime <= windowEnd;
+    return enVentanaArOUtc(demoTime, matchDate, timeWindowMinutes);
   });
 
   autoMatches.sort((a, b) => {

@@ -26,6 +26,12 @@ export const matchAssets = pgTable("match_assets", {
   filename: text("filename").notNull(),
   sourcePath: text("source_path"),
   createdAt: timestamp("created_at").defaultNow(),
+  // subidas de jugadores (2026-10-22): quién la subió, quién grabó la demo (POV, leído del archivo),
+  // huella para no repetir y origen ("admin" | "jugador")
+  uploadedBy: text("uploaded_by"),
+  pov: text("pov"),
+  sha256: text("sha256"),
+  origin: text("origin"),
 });
 
 export const levelshotOverrides = pgTable("levelshot_overrides", {
