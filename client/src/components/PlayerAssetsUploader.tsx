@@ -176,6 +176,10 @@ export default function PlayerAssetsUploader() {
 
   const subir = async () => {
     setSubiendo(true);
+    setError("");
+    // si está logueado como admin en el sitio, se manda el token: el admin no tiene límite de subidas
+    let adminToken = "";
+    try { adminToken = window.localStorage.getItem("adminToken") || ""; } catch { /* sin storage */ }
     for (const p of propuestas.filter((x) => x.marcado && x.partidaId && (x.estado === "listo" || x.estado === "error"))) {
       cambiar(p.clave, { estado: "subiendo", mensaje: undefined });
       try {
@@ -184,8 +188,18 @@ export default function PlayerAssetsUploader() {
         fd.append("kind", p.kind);
         fd.append("playerName", nombre.trim());
         fd.append("file", p.file, p.file.name);
-        const r = await fetch("/api/player-assets/upload", { method: "POST", body: fd });
+        const r = await fetch("/api/player-assets/upload", {
+          method: "POST",
+          body: fd,
+          headers: adminToken ? { "x-admin-token": adminToken } : undefined,
+        });
         const data = await r.json().catch(() => ({}));
+        if (r.status === 429) {
+          // límite de subidas: frenar la tanda (lo que falta queda tildado para seguir después)
+          cambiar(p.clave, { estado: "listo", mensaje: undefined });
+          setError(`${data.error || "Llegaste al límite de subidas"}. Lo que falta quedó marcado: volvé a tocar "Subir" en un rato.`);
+          break;
+        }
         if (!r.ok) throw new Error(data.error || `error ${r.status}`);
         cambiar(p.clave, { estado: "ok", marcado: false, mensaje: data.pov ? `subida · POV de ${data.pov}` : "subida" });
         queryClient.invalidateQueries({ queryKey: [p.kind === "demo" ? "match-demos" : "match-screenshots", p.partidaId] });

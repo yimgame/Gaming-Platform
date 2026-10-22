@@ -20,7 +20,7 @@ import { horaArgentina } from "./hora-ar";
 // ------------------------------------------------------------------ configuración
 export const MAX_DEMO_BYTES = 80 * 1024 * 1024;
 export const MAX_CAPTURA_BYTES = 20 * 1024 * 1024;
-const MAX_TOTAL_JUGADORES_BYTES = 10 * 1024 * 1024 * 1024;     // 10 GB entre todo lo que suben los jugadores
+const MAX_TOTAL_JUGADORES_BYTES = 20 * 1024 * 1024 * 1024;     // 20 GB entre todo lo que suben los jugadores (SSD de datos)
 const VENTANA_MIN = 10;                                            // tolerancia de hora (minutos)
 // sv_hostname de nuestros servers ("The Meg & Yim ...", "Meg & Yim - CTF - Server")
 const SERVIDOR_NUESTRO = new RegExp(process.env.DEMO_SERVIDOR_REGEX || "meg.*yim", "i");

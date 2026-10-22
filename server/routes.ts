@@ -102,12 +102,16 @@ import {
 } from "./player-uploads";
 
 const LEVELSHOTS_UPLOAD_DIR = path.resolve(process.cwd(), "data", "levelshots-images");
-const MATCH_ASSETS_UPLOAD_DIR = path.resolve(process.cwd(), "data", "match-assets");
-const MATCH_DEMOS_UPLOAD_DIR = path.join(MATCH_ASSETS_UPLOAD_DIR, "demos");
-const MATCH_SCREENSHOTS_UPLOAD_DIR = path.join(MATCH_ASSETS_UPLOAD_DIR, "screenshots");
-// lo que suben los jugadores va aparte (cupo propio y fácil de revisar/borrar)
-const PLAYER_DEMOS_UPLOAD_DIR = path.join(MATCH_ASSETS_UPLOAD_DIR, "jugadores", "demos");
-const PLAYER_SCREENSHOTS_UPLOAD_DIR = path.join(MATCH_ASSETS_UPLOAD_DIR, "jugadores", "screenshots");
+// Demos y capturas subidas viven en el SSD de datos (share \\192.168.0.200\gamesrv\Quake3\subidas), NO en
+// /app/data: el disco del LXC 101 está en el thin pool de Proxmox (si se llena se caen todos los LXC) y así el
+// container queda liviano. admin/ = lo que asocia el admin, jugadores/ = lo que suben los jugadores (con cupo).
+const SUBIDAS_DIR = path.resolve(process.env.SUBIDAS_DIR || "/mnt/ssd-jellyfin/gamesrv/Quake3/subidas");
+const MATCH_ASSETS_UPLOAD_DIR = SUBIDAS_DIR;
+const MATCH_DEMOS_UPLOAD_DIR = path.join(SUBIDAS_DIR, "admin", "demos");
+const MATCH_SCREENSHOTS_UPLOAD_DIR = path.join(SUBIDAS_DIR, "admin", "screenshots");
+const PLAYER_UPLOADS_DIR = path.join(SUBIDAS_DIR, "jugadores");
+const PLAYER_DEMOS_UPLOAD_DIR = path.join(PLAYER_UPLOADS_DIR, "demos");
+const PLAYER_SCREENSHOTS_UPLOAD_DIR = path.join(PLAYER_UPLOADS_DIR, "screenshots");
 const BACKUPS_UPLOAD_TEMP_DIR = path.resolve(process.cwd(), "data", "backups-upload-temp");
 
 const ensureLevelshotsUploadDir = async () => {
@@ -1269,7 +1273,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/player-assets/upload", (req, res) => {
     const ip = String(req.header("cf-connecting-ip") || req.header("x-forwarded-for")?.split(",")[0] || req.socket.remoteAddress || "?").trim();
-    if (!dentroDelLimite(ip)) {
+    const esAdmin = isAdminRequest(req.header("x-admin-token") || undefined);   // el admin no tiene límite de subidas
+    if (!esAdmin && !dentroDelLimite(ip)) {
       return res.status(429).json({ error: "Subiste muchos archivos seguidos: esperá un rato y seguí" });
     }
     playerUpload.single("file")(req, res, async (uploadError) => {
@@ -1319,7 +1324,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           sha256: hash,
           origin: "jugador",
         });
-        console.log(`[subida jugador] ${kind} ${original} -> partida ${matchId} por "${jugador}" (${ip}) pov=${validacion.pov ?? "-"}`);
+        console.log(`[subida jugador] ${kind} ${original} -> partida ${matchId} por "${jugador}"${esAdmin ? " [admin]" : ""} (${ip}) pov=${validacion.pov ?? "-"}`);
         return res.status(201).json({ ok: true, assetId: asset.id, pov: validacion.pov, detalle: validacion.detalle });
       } catch (error) {
         logRouteError("Error en subida de jugador", error);
@@ -1336,7 +1341,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const asset = await deleteManualMatchAsset(String(req.params.assetId || ""));
       if (!asset) return res.status(404).json({ error: "no existe" });
       const ruta = asset.sourcePath ? path.resolve(asset.sourcePath) : "";
-      if (ruta && ruta.startsWith(MATCH_ASSETS_UPLOAD_DIR + path.sep) && fs.existsSync(ruta)) {
+      const borrable = [MATCH_ASSETS_UPLOAD_DIR, PLAYER_UPLOADS_DIR].some((d) => ruta.startsWith(d + path.sep));
+      if (ruta && borrable && fs.existsSync(ruta)) {
         await fs.promises.unlink(ruta);
       }
       res.json({ ok: true });
