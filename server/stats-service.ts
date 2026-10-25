@@ -1,6 +1,6 @@
 import type { MatchStats, PlayerStats, PlayerRanking, RankingFilters } from '../shared/stats-schema';
 import { getAllMatches, getMatchesInDateRange } from './stats-parser';
-import { and, eq, gte, lte, sql } from "drizzle-orm";
+import { and, eq, gte, ilike, lte, sql } from "drizzle-orm";
 import { db } from "./db";
 import { statsMatches, statsPlayers } from "../shared/schema";
 import {
@@ -11,6 +11,7 @@ import {
   syncMatchesToStatsDb,
   triggerStatsAutoSyncInBackground,
 } from './match-stats-db-service';
+import { actualizarClasificacion, tipoDeJugador } from './player-kinds';
 
 let initialSyncPromise: Promise<void> | null = null;
 
@@ -108,7 +109,8 @@ async function calculateGlobalRankingFromDb(filters: Partial<RankingFilters> = {
     whereClauses.push(lte(statsMatches.playedAt, new Date(filters.endDate)));
   }
   if (filters.map) {
-    whereClauses.push(eq(statsMatches.map, filters.map));
+    // parte del nombre del mapa (como el filtro de la lista de partidas)
+    whereClauses.push(ilike(statsMatches.map, `%${filters.map.replace(/[\\%_]/g, (c) => "\\" + c)}%`));
   }
   if (filters.gameType) {
     whereClauses.push(eq(statsMatches.type, filters.gameType));
@@ -168,9 +170,12 @@ async function calculateGlobalRankingFromDb(filters: Partial<RankingFilters> = {
         defenses,
         returns,
         gameTypes: row.gameTypes || [],
+        kind: tipoDeJugador(row.name),
       };
     })
-    .filter((row) => row.totalMatches >= minMatches);
+    .filter((row) => row.totalMatches >= minMatches)
+    .filter((row) => filters.kind === 'humanos' ? row.kind === 'humano'
+      : filters.kind === 'bots' ? row.kind === 'bot' : true);
 
   const sortBy = filters.sortBy || 'score';
   rankings.sort((a, b) => {
@@ -200,6 +205,7 @@ async function calculateGlobalRankingFromDb(filters: Partial<RankingFilters> = {
  * Calcula el ranking global de jugadores basado en los filtros
  */
 export async function calculateGlobalRanking(filters: Partial<RankingFilters> = {}): Promise<PlayerRanking[]> {
+  void actualizarClasificacion();   // lee lo nuevo de los games.log en segundo plano (cada 15 min como mucho)
   try {
     await ensureStatsSeededInDb();
     triggerStatsAutoSyncInBackground();

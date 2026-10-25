@@ -81,6 +81,7 @@ export const PlayerRankingSchema = z.object({
   defenses: z.number().optional(),
   returns: z.number().optional(),
   gameTypes: z.array(z.string()).optional(), // Tipos de juego jugados
+  kind: z.enum(['humano', 'bot', 'desconocido']).optional(), // según los games.log (ver server/player-kinds.ts)
 });
 
 // Schema para filtros de ranking
@@ -90,6 +91,7 @@ export const RankingFiltersSchema = z.object({
   map: z.string().optional(),
   gameType: z.string().optional(),
   minMatches: z.number().optional().default(1),
+  kind: z.enum(['todos', 'humanos', 'bots']).optional().default('todos'),
   sortBy: z.enum(['score', 'kills', 'kdRatio', 'captures', 'defenses']).optional().default('score'),
 });
 

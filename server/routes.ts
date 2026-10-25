@@ -90,6 +90,7 @@ import { RankingFiltersSchema } from "../shared/stats-schema";
 import fs from "fs";
 import multer from "multer";
 import { crudoDesdeArgentina } from "./hora-ar";
+import { actualizarClasificacion } from "./player-kinds";
 import {
   MAX_CAPTURA_BYTES,
   MAX_DEMO_BYTES,
@@ -236,6 +237,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   await ensureLevelshotsUploadDir();
   await ensureMatchAssetsUploadDirs();
   await ensureBackupsUploadTempDir();
+  void actualizarClasificacion(true);   // bots/humanos del ranking: lee los games.log en segundo plano al arrancar
   await startBackupsScheduler();
 
   const getErrorMessage = (error: unknown) => {
@@ -857,7 +859,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/stats/ranking/global", async (req, res) => {
     try {
       const filters = RankingFiltersSchema.parse(req.body);
-      const ranking = await calculateGlobalRanking(filters);
+      // fechas "AAAA-MM-DD" del filtro = días de Buenos Aires -> hora cruda guardada (ver hora-ar.ts)
+      const dia = (v: string | undefined, fin: boolean) => {
+        const m = (v || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (!m) return v;
+        return crudoDesdeArgentina(+m[1], +m[2], +m[3], fin ? 23 : 0, fin ? 59 : 0, fin ? 59 : 0).toISOString();
+      };
+      const ranking = await calculateGlobalRanking({
+        ...filters,
+        startDate: dia(filters.startDate, false),
+        endDate: dia(filters.endDate, true),
+      });
       res.json({ ranking });
     } catch (error) {
       console.error("Error calculating global ranking:", error);

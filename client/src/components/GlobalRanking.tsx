@@ -10,20 +10,33 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Trophy, Medal, Award, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Trophy, Medal, Award, ArrowUpDown, ArrowUp, ArrowDown, Bot, User } from "lucide-react";
 import type { PlayerRanking } from "@/../../shared/stats-schema";
-import { useState } from "react";
+import { useEffect, useState, type ChangeEvent } from "react";
 
 type SortField = 'rank' | 'name' | 'totalScore' | 'totalKills' | 'totalDeaths' | 'kdRatio' | 'totalMatches' | 'avgScore';
 type SortDirection = 'asc' | 'desc';
 
-async function fetchGlobalRanking(filters = {}): Promise<PlayerRanking[]> {
+const MODOS = ["1v1", "2v2", "CA", "CTF", "CTFS", "FFA", "FT", "NTF", "TDM"];
+
+type FiltrosRanking = { kind: string; gameType: string; map: string; startDate: string; endDate: string; minMatches: string };
+const FILTROS_VACIOS: FiltrosRanking = { kind: "todos", gameType: "", map: "", startDate: "", endDate: "", minMatches: "" };
+
+async function fetchGlobalRanking(f: FiltrosRanking): Promise<PlayerRanking[]> {
+  // las fechas van como día de Buenos Aires (AAAA-MM-DD); el server las convierte
+  const cuerpo: Record<string, unknown> = { kind: f.kind };
+  if (f.gameType) cuerpo.gameType = f.gameType;
+  if (f.map.trim()) cuerpo.map = f.map.trim();
+  if (f.startDate) cuerpo.startDate = f.startDate;
+  if (f.endDate) cuerpo.endDate = f.endDate;
+  if (Number(f.minMatches) > 1) cuerpo.minMatches = Number(f.minMatches);
   const response = await fetch("/api/stats/ranking/global", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(filters),
+    body: JSON.stringify(cuerpo),
   });
   
   if (!response.ok) {
@@ -37,11 +50,29 @@ async function fetchGlobalRanking(filters = {}): Promise<PlayerRanking[]> {
 export default function GlobalRanking() {
   const [sortField, setSortField] = useState<SortField>('rank');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
-  
-  const { data: ranking, isLoading, error } = useQuery({
-    queryKey: ["globalRanking"],
-    queryFn: () => fetchGlobalRanking(),
+  const [borrador, setBorrador] = useState<FiltrosRanking>(FILTROS_VACIOS);   // lo que se tipea
+  const [filtros, setFiltros] = useState<FiltrosRanking>(FILTROS_VACIOS);     // lo aplicado
+  const [buscar, setBuscar] = useState("");                                   // nombre: se filtra acá, sin ir al server
+  const [mostrar, setMostrar] = useState(50);
+
+  // los campos se aplican solos al dejar de tipear (medio segundo)
+  useEffect(() => {
+    const t = window.setTimeout(() => setFiltros(borrador), 500);
+    return () => window.clearTimeout(t);
+  }, [borrador]);
+
+  const { data: ranking, isLoading, isFetching, error } = useQuery({
+    queryKey: ["globalRanking", filtros],
+    queryFn: () => fetchGlobalRanking(filtros),
+    placeholderData: (previo) => previo,
   });
+
+  const campo = (k: keyof FiltrosRanking) => ({
+    value: borrador[k],
+    onChange: (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setBorrador((b) => ({ ...b, [k]: e.target.value })),
+  });
+  const hayFiltros = buscar.trim() !== "" ||
+    (Object.keys(borrador) as (keyof FiltrosRanking)[]).some((k) => borrador[k] !== FILTROS_VACIOS[k]);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -61,7 +92,11 @@ export default function GlobalRanking() {
       : <ArrowDown className="w-4 h-4 ml-1 inline text-primary" />;
   };
 
-  const sortedRanking = ranking ? [...ranking].sort((a, b) => {
+  const limpiarNombre = (n: string) => n.replace(/\^(x[0-9a-fA-F]{6}|.)/g, "").toLowerCase();
+  const filtrados = ranking
+    ? ranking.filter((p) => !buscar.trim() || limpiarNombre(p.name).includes(buscar.trim().toLowerCase()))
+    : [];
+  const sortedRanking = [...filtrados].sort((a, b) => {
     let aVal: any = a[sortField];
     let bVal: any = b[sortField];
     
@@ -76,9 +111,9 @@ export default function GlobalRanking() {
     } else {
       return aVal < bVal ? 1 : -1;
     }
-  }) : [];
+  });
 
-  if (isLoading) {
+  if (isLoading && !ranking) {
     return (
       <Card className="p-6">
         <div className="animate-pulse space-y-4">
@@ -116,11 +151,36 @@ export default function GlobalRanking() {
           Ranking Global
         </h2>
         <Badge variant="outline" className="text-sm">
-          {ranking.length} jugadores
+          {filtrados.length} jugadores
         </Badge>
       </div>
 
-      <div className="overflow-x-auto">
+      {/* filtros */}
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2 mb-2">
+        <select className="h-9 rounded-md border bg-background px-2 text-sm" title="Humanos o bots" {...campo("kind")}>
+          <option value="todos">Humanos y bots</option>
+          <option value="humanos">👤 Solo humanos</option>
+          <option value="bots">🤖 Solo bots</option>
+        </select>
+        <select className="h-9 rounded-md border bg-background px-2 text-sm" {...campo("gameType")}>
+          <option value="">Todos los modos</option>
+          {MODOS.map((m) => <option key={m} value={m}>{m}</option>)}
+        </select>
+        <Input placeholder="Jugador" className="h-9" value={buscar} onChange={(e) => setBuscar(e.target.value)} />
+        <Input placeholder="Mapa" className="h-9" {...campo("map")} />
+        <Input type="date" className="h-9" title="Desde" {...campo("startDate")} />
+        <Input type="date" className="h-9" title="Hasta" {...campo("endDate")} />
+        <Input type="number" min={1} placeholder="Mín. partidas" className="h-9" title="Mínimo de partidas" {...campo("minMatches")} />
+        <Button variant="ghost" className="h-9" disabled={!hayFiltros}
+                onClick={() => { setBorrador(FILTROS_VACIOS); setFiltros(FILTROS_VACIOS); setBuscar(""); }}>
+          Limpiar filtros
+        </Button>
+      </div>
+      <p className="text-xs text-muted-foreground mb-4">
+        👤 humano · 🤖 bot — se distingue por los registros de los servers (los bots entran con nivel de dificultad).
+      </p>
+
+      <div className={`overflow-x-auto transition-opacity ${isFetching ? "opacity-60" : ""}`}>
         <Table>
           <TableHeader>
             <TableRow>
@@ -208,7 +268,14 @@ export default function GlobalRanking() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {sortedRanking.slice(0, 50).map((player) => (
+            {sortedRanking.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={9} className="text-center text-muted-foreground py-8">
+                  No hay jugadores con esos filtros.
+                </TableCell>
+              </TableRow>
+            )}
+            {sortedRanking.slice(0, mostrar).map((player) => (
               <TableRow 
                 key={player.name}
                 className={player.rank <= 3 ? "bg-muted/50" : ""}
@@ -219,7 +286,18 @@ export default function GlobalRanking() {
                     <span>#{player.rank}</span>
                   </div>
                 </TableCell>
-                <TableCell className="font-bold">{player.name}</TableCell>
+                <TableCell className="font-bold">
+                  <span className="inline-flex items-center gap-1.5">
+                    {player.kind === "humano" ? (
+                      <User className="w-4 h-4 text-green-500 shrink-0" aria-label="humano" />
+                    ) : player.kind === "bot" ? (
+                      <Bot className="w-4 h-4 text-muted-foreground shrink-0" aria-label="bot" />
+                    ) : null}
+                    <span title={player.kind === "humano" ? "Humano" : player.kind === "bot" ? "Bot" : "Sin datos"}>
+                      {player.name}
+                    </span>
+                  </span>
+                </TableCell>
                 <TableCell>
                   <div className="flex gap-1 flex-wrap">
                     {player.gameTypes?.map((type) => (
@@ -254,6 +332,19 @@ export default function GlobalRanking() {
           </TableBody>
         </Table>
       </div>
+
+      {sortedRanking.length > 50 && (
+        <div className="flex items-center justify-end gap-2 mt-4 text-sm text-muted-foreground">
+          Mostrar
+          <select className="h-8 rounded-md border bg-background px-2 text-sm" value={mostrar}
+                  onChange={(e) => setMostrar(Number(e.target.value))}>
+            <option value={50}>50</option>
+            <option value={100}>100</option>
+            <option value={100000}>todos</option>
+          </select>
+          de {sortedRanking.length}
+        </div>
+      )}
     </Card>
   );
 }
