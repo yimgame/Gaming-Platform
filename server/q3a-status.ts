@@ -36,8 +36,8 @@ export interface QuakeServerStatusEntry extends QuakeServerStatus {
   host: string;
 }
 
-// Configuración RCON (para uso futuro)
-const RCON_PASSWORD = process.env.Q3A_RCON_PASSWORD || 'Megcone';
+// Configuración RCON (para uso futuro): SOLO por variable de entorno (.env, gitignorado), nunca en el código
+const RCON_PASSWORD = process.env.Q3A_RCON_PASSWORD || '';
 
 /**
  * Consulta el estado del servidor Quake 3 via UDP

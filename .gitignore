@@ -33,3 +33,4 @@ data/backups-upload-temp/
 
 # backups locales de despliegues
 backups/
+data/player-kinds.json
